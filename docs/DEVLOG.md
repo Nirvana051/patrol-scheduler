@@ -120,3 +120,7 @@
 ## 02:25–02:35 备份与标签
 - `scripts/backup_db.py`：sqlite backup API 在线备份（WAL 下直接 cp 不安全），保留最近 N 份；Makefile `make backup` / `make eval`；部署说明加 cron。
 - 83 用例全绿，打 tag `v0.2.0`。开发实例重启到最终代码，定时观察继续（每 3 分钟一趟）。
+
+## 02:35–02:50 补测试
+- SSE `/api/stream` 用例（hello / 状态 / TTS / 执行与检查推送 / 断开后释放订阅）：TestClient 对不结束的流会挂住，改为把同一个 app 再起一个 uvicorn 用 requests 流式读。
+- 机器人操作接口用例：不等待的设备启动 + 轮询、定位失败（drift）与成功、急停往返与前置检查提示、停设备后定位失效。
