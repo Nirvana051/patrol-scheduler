@@ -1,7 +1,7 @@
 # 常用命令。需要先建好 .venv（见 README）。
 PY := .venv/bin/python
 
-.PHONY: run mock test lint shots seed smoke clean-media lock
+.PHONY: run mock test lint shots seed smoke clean-media lock backup eval
 
 run:            ## 启动调度系统（读 config/.env）
 	$(PY) -m app.main
@@ -26,6 +26,12 @@ smoke:          ## 真机只读冒烟
 
 clean-media:    ## 清理 30 天前的执行媒体与事件（先 dry-run 看看）
 	$(PY) scripts/cleanup_media.py --keep-days 30 --events --dry-run
+
+backup:         ## 在线备份 SQLite 到 data/backups（保留 14 份）
+	$(PY) scripts/backup_db.py
+
+eval:           ## 用人工复核过的检查评测当前 VLM
+	$(PY) scripts/eval_vlm.py
 
 lock:           ## 重新生成 requirements.lock
 	pip3 --python $(PY) freeze --local | grep -v -E '^(ruff|pip)=' > requirements.lock
