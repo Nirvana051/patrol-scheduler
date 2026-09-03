@@ -21,7 +21,8 @@ export async function render(root, { store }) {
       </div></div>
     <div class="card"><div class="card-head"><h2>全景画面</h2><span id="video-src" class="muted small"></span></div><div class="video-box" id="video"><span>—</span></div></div>
   </div>
-  <div class="card" style="margin-top:14px"><div class="card-head"><h2>最近检查</h2><a href="#/runs" class="small">全部执行 →</a></div><div id="d-insp" class="grid grid-4"></div></div>`;
+  <div class="card" style="margin-top:14px"><div class="card-head"><h2>最近检查</h2><a href="#/runs" class="small">全部执行 →</a></div><div id="d-insp" class="grid grid-4"></div></div>
+  <div class="card" style="margin-top:14px"><div class="card-head"><h2>近 30 天按航点统计</h2><span id="d-stats-sum" class="muted small"></span></div><div class="table-wrap"><table><thead><tr><th>任务航点</th><th>检查次数</th><th>通过</th><th>不通过</th><th>待复核</th><th>通过率</th><th>平均耗时</th><th>最近</th></tr></thead><tbody id="d-stats"></tbody></table></div></div>`;
 
   const paint = (s) => {
     if (!s) return;
@@ -82,6 +83,15 @@ export async function render(root, { store }) {
   };
   paintInsp();
   offs.push(store.on('inspection', paintInsp));
+  const paintStats = async () => {
+    try {
+      const st = await api('/api/stats?days=30');
+      root.querySelector('#d-stats-sum').textContent = `共 ${st.totals.inspections} 次检查 · 通过 ${st.totals.passed} · 不通过 ${st.totals.failed} · 待复核 ${st.totals.unknown} · 执行 ${Object.entries(st.runs).map(([k, v]) => `${k} ${v}`).join(' / ') || '—'}`;
+      root.querySelector('#d-stats').innerHTML = st.per_waypoint.length ? st.per_waypoint.map(w => `<tr><td><b>${esc(w.waypoint_name)}</b></td><td>${w.total}</td><td>${w.passed}</td><td>${w.failed ? `<span style="color:var(--danger);font-weight:700">${w.failed}</span>` : 0}</td><td>${w.unknown}</td><td><div class="progress" style="width:120px;display:inline-block;vertical-align:middle;margin-right:6px"><i style="width:${(w.pass_rate || 0) * 100}%;background:${w.pass_rate >= 0.9 ? 'var(--ok)' : w.pass_rate >= 0.6 ? 'var(--warn)' : 'var(--danger)'}"></i></div>${w.pass_rate == null ? '—' : Math.round(w.pass_rate * 100) + '%'}</td><td>${w.avg_latency_ms} ms</td><td class="small muted">${fmt.dt(w.last_at)}</td></tr>`).join('') : '<tr><td colspan="8" class="muted small">还没有检查记录</td></tr>';
+    } catch { /* ignore */ }
+  };
+  paintStats();
+  offs.push(store.on('inspection', paintStats));
 
   // 初始化面板
   const mapSel = root.querySelector('#loc-map'), nodeSel = root.querySelector('#loc-node');

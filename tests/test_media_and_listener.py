@@ -20,6 +20,10 @@ def test_build_source_variants(tmp_path):
     assert build_source('synthetic').name == 'synthetic'
     assert build_source('lavfi:testsrc').name == 'lavfi'
     assert build_source('rtsp://h:8554/x').describe().startswith('rtsp')
+    assert build_source('hls', hls_url_provider=lambda: 'https://h/hls/x/index.m3u8').describe().startswith('hls')
+    assert build_source('https://h/hls/x/index.m3u8').name == 'hls'
+    with pytest.raises(SnapshotError):
+        build_source('hls')
     p = tmp_path / 'a.jpg'
     Image.new('RGB', (64, 32), (1, 2, 3)).save(p)
     src = build_source(f'file:{p}')

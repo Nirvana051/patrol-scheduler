@@ -40,7 +40,7 @@ DEFAULTS: dict[str, str] = {
     'TTS_ZMQ_ENDPOINT': 'tcp://192.168.41.2:5555',
     'TTS_WEBHOOK_URL': '',
     # 抓图 / 全景
-    'SNAPSHOT_SOURCE': 'synthetic',   # rtsp | synthetic | file:<path> | lavfi:<filter>
+    'SNAPSHOT_SOURCE': 'synthetic',   # rtsp | hls | synthetic | file:<path> | lavfi:<filter> | http(s)://…m3u8
     'FORWARD_DEG': '180',
     'SETTLE_SECONDS': '2',
     'LEG_TIMEOUT': '600',

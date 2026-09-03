@@ -120,3 +120,8 @@ def test_schema_migration_from_v1(tmp_path):
     assert 'item_seq' in cols
     db2 = Database(tmp_path / 'fresh.db')
     assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}
+
+
+def test_stats_endpoint_empty(app_client):
+    st = app_client.get('/api/stats').json()
+    assert st['totals'] == {'inspections': 0, 'passed': 0, 'failed': 0, 'unknown': 0} and st['per_waypoint'] == []

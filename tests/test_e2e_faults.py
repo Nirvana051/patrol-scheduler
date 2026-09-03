@@ -102,7 +102,7 @@ def test_lost_localization_logged_but_continues(app_client, mock_robot):
     init_robot(app_client, '1')
     mock_robot.speed = 3.0
     try:
-        tid = make_task(app_client, nodes=('20',))
+        tid = make_task(app_client, nodes=('20',), lost_localization_action='continue')
         run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
         _wait_leg_status(app_client, run_id, ('dispatched', 'navigating'))
         mock_robot.lose_localization(1.0)
@@ -152,3 +152,36 @@ def test_external_task_replaces_ours_aborts_without_stopping_it(app_client, mock
 def test_timestamps_carry_timezone(app_client):
     ev = app_client.get('/api/events?limit=1').json()['items'][0]
     assert ev['ts'][-6] in '+-' and ev['ts'][-3] == ':'                     # …+08:00
+
+
+def test_lost_localization_pauses_until_relocalized(app_client, mock_robot):
+    """默认策略：丢定位 → 停云端任务、段回到 pending、执行暂停；人工重新定位后「继续」→ 从当前最近航点重规划并完成。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')
+    mock_robot.speed = 2.0
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        mock_robot.lose_localization(2.0)
+        t0 = time.time()
+        while time.time() - t0 < 20:
+            r = app_client.get(f'/api/runs/{run_id}').json()
+            if r['status'] == 'paused':
+                break
+            time.sleep(0.2)
+        assert r['status'] == 'paused' and r['legs'][0]['status'] == 'pending' and '丢定位' in (r['legs'][0]['error'] or '')
+        assert mock_robot.snapshot_state()['task']['status'] in ('idle', 'stopped')           # 云端任务已被停下
+        assert any(e['type'] == 'run_pause_lost_localization' for e in r['events'])
+        time.sleep(2.2)                                                                        # 定位恢复
+        pos = mock_robot.snapshot_state()
+        near = min(mock_robot.maps[DEMO_MAP], key=lambda k: (mock_robot.maps[DEMO_MAP][k]['pose']['position']['x'] - pos['x']) ** 2 + (mock_robot.maps[DEMO_MAP][k]['pose']['position']['y'] - pos['y']) ** 2)
+        assert app_client.post('/api/robot/init/localize', json={'map_name': DEMO_MAP, 'node_id': near}).status_code == 200
+        mock_robot.speed = 10.0
+        assert app_client.post(f'/api/runs/{run_id}/resume').status_code == 200
+        run = wait_run(app_client, run_id, timeout=60)
+        assert run['status'] == 'completed' and run['legs'][0]['status'] == 'done'
+        assert run['legs'][0]['attempt'] == 2 and run['legs'][0]['idempotency_key'].endswith('-a2')   # 重新下发必须换新幂等键
+        assert run['legs'][0]['from_node'] not in (None, '1') or run['legs'][0]['path'][0] != '1'  # 从当前位置重规划
+    finally:
+        mock_robot.speed = 10.0

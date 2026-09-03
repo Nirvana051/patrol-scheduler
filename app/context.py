@@ -65,6 +65,7 @@ class AppContext:
         self.tts = build_tts(cfg, self.bus, self.media_dir)
         self.snapshot = build_source(cfg.get('SNAPSHOT_SOURCE'),
                                      rtsp_url_provider=lambda: self.gateway.rtsp_url(),
+                                     hls_url_provider=lambda: self.gateway.hls_url(),
                                      pose_provider=lambda: self.status.pose() if self.status else None,
                                      scene_provider=lambda: self.scene)
 

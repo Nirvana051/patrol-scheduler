@@ -17,7 +17,8 @@ from app.robot.client import RobotError
 
 DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
-                   'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False}
+                   'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False,
+                   'lost_localization_action': 'pause'}   # continue | pause | fail
 
 
 class RunAbort(Exception):
@@ -207,7 +208,10 @@ class MissionRunner(threading.Thread):
     def _execute_leg(self, leg: dict) -> None:
         target = leg['to_node']
         max_retries = int(self.opt.get('max_retries') or 0)
-        attempt = 0
+        lease_retries = int(self.opt.get('lease_retries') or 0)
+        attempt = 0          # 每次下发 +1 —— 幂等键必须换新，否则云端只回放不执行（C3）
+        failures = 0         # 计入 max_retries 的失败次数
+        lease_tries = 0
         while True:
             attempt += 1
             self.skip_req.clear()
@@ -234,10 +238,10 @@ class MissionRunner(threading.Thread):
                     else:
                         self.ctx.events.unsubscribe(q)
                         self._set_leg(leg, status='failed', error=f'下发失败：{e}', ended_at=now_iso())
-                        lease_retries = int(self.opt.get('lease_retries') or 0)
                         wait_s = float(self.opt.get('lease_retry_seconds') or 30)
-                        if e.status == 409 and attempt <= lease_retries:
-                            self._log('leg_dispatch_409', f"第 {leg['seq']} 段：控制权被占（{e}），{wait_s:.0f} 秒后重试（{attempt}/{lease_retries}）", level='warn', leg_id=leg['id'])
+                        if e.status == 409 and lease_tries < lease_retries:
+                            lease_tries += 1
+                            self._log('leg_dispatch_409', f"第 {leg['seq']} 段：控制权被占（{e}），{wait_s:.0f} 秒后重试（{lease_tries}/{lease_retries}）", level='warn', leg_id=leg['id'])
                             if self._sleep_unless_abort(wait_s):
                                 raise RunAbort('人工中止')
                             continue
@@ -263,6 +267,16 @@ class MissionRunner(threading.Thread):
                     run_inspection(self.ctx, self.run_id, leg, leg['tw'])
                 self._set_leg(leg, status='done', ended_at=now_iso())
                 return
+            if outcome == 'lost_localization':
+                self._safe_stop_task()
+                self._set_leg(leg, status='pending', error='丢定位，等待人工重新定位后继续')
+                self._log('run_pause_lost_localization', '定位丢失：已停下云端任务并暂停执行。请在「总览」用机器人当前最近的航点重新定位，然后点「继续」', level='error', leg_id=leg['id'])
+                self.pause_req.set()
+                self._wait_if_paused()
+                if self.abort_req.is_set():
+                    raise RunAbort('人工中止')
+                self._relocate_current_node()                 # 不计入失败次数，但下一次下发会用新的幂等键
+                continue
             if outcome == 'skipped':
                 self._safe_stop_task()
                 self._set_leg(leg, status='skipped', ended_at=now_iso())
@@ -288,8 +302,9 @@ class MissionRunner(threading.Thread):
                       'not_started': '任务下发成功但机器人没有动（设备未启动 / 未定位？见 full-patrol.md ②④）',
                       'failed:offline': f"机器人掉线 / 云端不可达超过 {self.opt.get('offline_timeout')} s",
                       'failed:stall': f"停滞：超过 {self.opt.get('stall_timeout')} s 没有到达新的航点（持续避障 / 卡住？）"}.get(outcome, outcome)
-            if attempt <= max_retries and outcome != 'not_started':
-                self._log('leg_retry', f"第 {leg['seq']} 段失败（{reason}），重试 {attempt}/{max_retries}", level='warn', leg_id=leg['id'])
+            failures += 1
+            if failures <= max_retries and outcome != 'not_started':
+                self._log('leg_retry', f"第 {leg['seq']} 段失败（{reason}），重试 {failures}/{max_retries}", level='warn', leg_id=leg['id'])
                 continue
             self._set_leg(leg, status='failed', error=reason, ended_at=now_iso())
             raise LegFailed(f"第 {leg['seq']} 段失败：{reason}")
@@ -365,9 +380,14 @@ class MissionRunner(threading.Thread):
                     elif t == 'task_stopped':
                         return 'stopped'
                     elif t == 'localization' and not d.get('valid'):
-                        self._log('lost_localization', '巡检途中丢定位', level='warn', leg_id=leg['id'])
+                        action = str(self.opt.get('lost_localization_action') or 'pause')
                         if self.opt.get('stop_on_lost_localization'):
+                            action = 'fail'
+                        self._log('lost_localization', f'巡检途中丢定位（策略：{action}）', level='warn', leg_id=leg['id'])
+                        if action == 'fail':
                             return 'failed:lost_localization'
+                        if action == 'pause':
+                            return 'lost_localization'
                     elif t == 'emergency' and d.get('active'):
                         self._log('emergency_during_leg', '巡检途中急停指令开始下发', level='error', leg_id=leg['id'])
                 now = time.time()

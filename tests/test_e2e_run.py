@@ -70,6 +70,8 @@ def test_full_mission_completes_with_inspections(app_client, mock_robot):
     assert reached and all(e['cloud_seq'] for e in reached)
     assert any(e['type'] == 'task_completed' for e in cloud)
     assert run['summary'] == {'legs': 3, 'legs_done': 3, 'inspections': 3, 'passed': 2, 'failed': 1, 'unknown': 0}
+    st = app_client.get('/api/stats?days=1').json()
+    assert st['totals']['inspections'] == 3 and st['totals']['failed'] == 1 and any(w['pass_rate'] == 0 for w in st['per_waypoint'])
     # 机器人最终停在最后一个任务航点
     st = mock_robot.snapshot_state()
     assert abs(st['x'] - 32.0) < 0.2 and abs(st['y'] - 7.0) < 0.2   # 航点 43 = 东侧支路 (32, 7)

@@ -57,6 +57,34 @@ class RtspFfmpegSource(SnapshotSource):
             return 'rtsp (地址未知)'
 
 
+class HlsFfmpegSource(SnapshotSource):
+    """从 HLS 播放列表抓一帧（8554 被防火墙挡时的备选，延迟比 RTSP 高 2–3 s）。"""
+    name = 'hls'
+
+    def __init__(self, url_provider: Callable[[], str], *, timeout: float = 40.0) -> None:
+        self.url_provider = url_provider
+        self.timeout = timeout
+
+    def grab(self, context: dict | None = None) -> bytes:
+        if not shutil.which('ffmpeg'):
+            raise SnapshotError('本机没有 ffmpeg，无法抓帧')
+        url = self.url_provider()
+        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', url, '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-']
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=self.timeout)
+        except subprocess.TimeoutExpired as e:
+            raise SnapshotError(f'HLS 抓帧超时（{self.timeout}s）：{url}') from e
+        if r.returncode != 0 or not r.stdout:
+            raise SnapshotError(f"HLS 抓帧失败: {r.stderr.decode('utf-8', 'replace')[:300]}")
+        return r.stdout
+
+    def describe(self) -> str:
+        try:
+            return f'hls {self.url_provider()}'
+        except Exception:      # noqa: BLE001
+            return 'hls (地址未知)'
+
+
 class LavfiSource(SnapshotSource):
     """ffmpeg 的合成信号源（testsrc 等），用来验证 ffmpeg 抓帧管道本身。"""
     name = 'lavfi'
@@ -126,6 +154,7 @@ class FileSource(SnapshotSource):
 
 
 def build_source(spec: str, *, rtsp_url_provider: Callable[[], str] | None = None,
+                 hls_url_provider: Callable[[], str] | None = None,
                  pose_provider: Callable[[], dict | None] | None = None,
                  scene_provider: Callable[[], dict] | None = None) -> SnapshotSource:
     spec = (spec or 'synthetic').strip()
@@ -133,6 +162,12 @@ def build_source(spec: str, *, rtsp_url_provider: Callable[[], str] | None = Non
         if rtsp_url_provider is None:
             raise SnapshotError('rtsp 源需要 rtsp_url_provider')
         return RtspFfmpegSource(rtsp_url_provider)
+    if spec == 'hls':
+        if hls_url_provider is None:
+            raise SnapshotError('hls 源需要 hls_url_provider')
+        return HlsFfmpegSource(hls_url_provider)
+    if spec.startswith('http://') or spec.startswith('https://'):
+        return HlsFfmpegSource(lambda: spec)
     if spec.startswith('rtsp://'):
         return RtspFfmpegSource(lambda: spec)
     if spec.startswith('file:'):
