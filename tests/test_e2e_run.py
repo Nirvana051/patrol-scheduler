@@ -135,3 +135,26 @@ def test_not_started_detected_when_robot_ignores_task(app_client, mock_robot):
     tid = make_task(app_client, nodes=('5',))
     run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'], timeout=40)
     assert run['status'] == 'failed' and '没有动' in run['error']
+
+
+def test_manual_coordinate_waypoint_and_return_to_start_and_full_pano(app_client, mock_robot, monkeypatch):
+    """手工坐标的任务航点（无导航航点 → 取最近的）、返回起点、附整张全景给 VLM。"""
+    init_robot(app_client, '1')
+    app_client.put('/api/settings', json={'VLM_SEND_FULL_PANO': '1'})
+    sync_map(app_client)
+    r = app_client.post('/api/task-waypoints', json={'name': '手工点', 'map_name': DEMO_MAP, 'x': 6.7, 'y': 0.3, 'prompt': '有人吗', 'angle_from': 330, 'angle_to': 30})
+    assert r.status_code == 201 and r.json()['nav_node_id'] is None
+    r = app_client.post('/api/tasks', json={'name': 'manual', 'map_name': DEMO_MAP, 'waypoint_ids': [r.json()['id']],
+                                            'options': {'settle_seconds': 0, 'return_to_start': True, 'not_started_timeout': 6}})
+    tid = r.json()['id']
+    plan = app_client.get(f'/api/tasks/{tid}/plan').json()
+    assert plan['legs'][0]['to_node'] == '4' and plan['legs'][-1]['name'] == '返回起点' and plan['legs'][-1]['to_node'] == '1'
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    assert run['status'] == 'completed', run['error']
+    assert [l['to_node'] for l in run['legs']] == ['4', '1'] and [l['status'] for l in run['legs']] == ['done', 'done']
+    assert len(run['inspections']) == 1
+    insp = run['inspections'][0]
+    assert insp['angle_from'] == 330 and insp['angle_to'] == 30       # 跨缝范围原样记录
+    st = mock_robot.snapshot_state()
+    assert abs(st['x']) < 0.2 and abs(st['y']) < 0.2                    # 回到起点
+    assert any(e['type'] == 'plan_note' for e in run['events'])         # 记录了「取最近导航航点」

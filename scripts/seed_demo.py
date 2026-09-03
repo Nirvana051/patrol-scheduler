@@ -42,6 +42,9 @@ def main() -> int:
     else:
         raise SystemExit('调度系统未就绪')
 
+    health = requests.get(B + '/api/health', timeout=5).json()
+    if health.get('mode') != 'mock' and (a.init or a.run or a.reset):
+        raise SystemExit('当前调度系统连接的是真机（REAL），演示脚本拒绝执行 --init/--run/--reset；请在网页上手工操作。')
     if a.reset:
         requests.post(a.mock.rstrip('/') + '/mock/reset', json={'node_id': '1', 'map_name': MAP}, timeout=5)
         print('mock 机器人已复位到航点 1')
