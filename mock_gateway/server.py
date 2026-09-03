@@ -415,7 +415,7 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     async def mock_preempt(request: Request):
         b = await body_json(request)
         owner = b.get('owner') or 'admin'
-        secs = float(b.get('seconds') or 60)
+        secs = float(b['seconds']) if 'seconds' in b else 60.0
         with robot.lock:
             robot.lease = {'owner': owner, 'heldSince': int(time.time() * 1000),
                            'expiresAt': int((time.time() + secs) * 1000)} if secs > 0 else None

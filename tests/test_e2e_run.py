@@ -1,0 +1,128 @@
+"""端到端：初始化 → 建任务 → 分段执行 → 每个任务航点抓图/裁切/VLM/TTS → 事件落库。全部对着 mock 网关。"""
+import re
+import time
+
+from tests.conftest import DEMO_MAP, init_robot, sync_map
+
+
+def make_task(client, nodes=('5', '20', '43'), **options):
+    sync_map(client)
+    ids = []
+    for i, nid in enumerate(nodes):
+        r = client.post('/api/task-waypoints', json={'name': f'点{nid}', 'map_name': DEMO_MAP, 'nav_node_id': nid, 'prompt': '目标是否正常？',
+                                                     'angle_from': 160, 'angle_to': 220, 'answer_template': {'expected': 'yes', 'on_pass': '{name}正常', 'on_fail': '{name}异常'}})
+        assert r.status_code == 201, r.text
+        ids.append(r.json()['id'])
+    opts = {'settle_seconds': 0, 'leg_timeout': 60, 'not_started_timeout': 6, 'max_retries': 0, **options}
+    r = client.post('/api/tasks', json={'name': 'e2e', 'map_name': DEMO_MAP, 'waypoint_ids': ids, 'options': opts})
+    assert r.status_code == 201, r.text
+    return r.json()['id']
+
+
+def wait_run(client, run_id, timeout=90):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        r = client.get(f'/api/runs/{run_id}').json()
+        if r['status'] in ('completed', 'failed', 'aborted'):
+            return r
+        time.sleep(0.5)
+    raise AssertionError(f'run {run_id} 未在 {timeout}s 内结束: {r["status"]} {[l["status"] for l in r["legs"]]}')
+
+
+def test_full_mission_completes_with_inspections(app_client, mock_robot):
+    init_robot(app_client, '1')
+    tid = make_task(app_client)
+    r = app_client.post(f'/api/tasks/{tid}/run')
+    assert r.status_code == 202, r.text
+    run_id = r.json()['id']
+    assert app_client.post(f'/api/tasks/{tid}/run').status_code == 409          # 同时只能一个执行
+    run = wait_run(app_client, run_id)
+    assert run['status'] == 'completed', run
+    assert [l['status'] for l in run['legs']] == ['done', 'done', 'done']
+    assert [l['to_node'] for l in run['legs']] == ['5', '20', '43']
+    assert run['legs'][0]['from_node'] == '1' and run['legs'][0]['path'][0] == '1' and run['legs'][0]['path'][-1] == '5'
+    assert run['legs'][1]['from_node'] == '5'                                   # 下一段从上一段终点出发
+    for leg in run['legs']:
+        assert re.fullmatch(rf'ps-r{run_id}-l\d+-a1', leg['idempotency_key'])
+        assert leg['cloud_task'] is None or leg['cloud_task'].get('status') in ('navigating', 'completed', None)
+    insp = run['inspections']
+    assert len(insp) == 3
+    assert [i['answer'] for i in insp] == ['yes', 'no', 'yes']                    # mock 交替
+    assert [i['passed'] for i in insp] == [1, 0, 1]
+    assert insp[0]['tts_text'] == '点5正常' and insp[1]['tts_text'] == '点20异常'
+    for i in insp:
+        assert app_client.get(i['image_url']).status_code == 200
+        assert app_client.get(i['crop_url']).status_code == 200
+        assert app_client.get(i['annot_url']).status_code == 200
+    types = [e['type'] for e in run['events']]
+    assert 'preflight' in types and types.count('leg_dispatched') == 3 and types.count('leg_arrived') == 3
+    assert types.count('vlm_answer') == 3 and types.count('tts') == 3 and types[-1] == 'run_finished'
+    cloud = app_client.get('/api/events?source=cloud&limit=200').json()['items']
+    reached = [e for e in cloud if e['type'] == 'waypoint_reached']
+    assert reached and all(e['cloud_seq'] for e in reached)
+    assert any(e['type'] == 'task_completed' for e in cloud)
+    assert run['summary'] == {'legs': 3, 'legs_done': 3, 'inspections': 3, 'passed': 2, 'failed': 1, 'unknown': 0}
+    # 机器人最终停在最后一个任务航点
+    st = mock_robot.snapshot_state()
+    assert abs(st['x'] - 32.0) < 0.2 and abs(st['y'] - 7.0) < 0.2   # 航点 43 = 东侧支路 (32, 7)
+
+
+def test_preflight_blocks_when_not_localized(app_client, mock_robot):
+    tid = make_task(app_client, nodes=('3',))
+    r = app_client.post(f'/api/tasks/{tid}/run')
+    assert r.status_code == 202
+    run = wait_run(app_client, r.json()['id'], timeout=30)
+    assert run['status'] == 'aborted' and '定位未就绪' in run['error']
+    assert run['legs'] == []
+
+
+def test_task_failed_event_marks_run_failed(app_client, mock_robot):
+    init_robot(app_client, '1')
+    tid = make_task(app_client, nodes=('5', '20'))
+    mock_robot.inject_fault('obstacle')
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    assert run['status'] == 'failed' and '0x234B' in run['error']
+    assert run['legs'][0]['status'] == 'failed' and run['legs'][1]['status'] == 'aborted'
+    assert run['inspections'] == []
+    assert app_client.get('/api/robot/status').json()['task']['terminal'] is True
+
+
+def test_retry_after_failure_uses_new_idempotency_key(app_client, mock_robot):
+    init_robot(app_client, '1')
+    tid = make_task(app_client, nodes=('5',), max_retries=1)
+    mock_robot.inject_fault('planning')
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    assert run['status'] == 'completed', (run['error'], [(l['status'], l['attempt'], l['error']) for l in run['legs']], [e['message'] for e in run['events']])
+    leg = run['legs'][0]
+    assert leg['attempt'] == 2 and leg['idempotency_key'].endswith('-a2') and leg['status'] == 'done'
+    types = [e['type'] for e in run['events']]
+    assert 'leg_retry' in types
+
+
+def test_abort_stops_cloud_task(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.speed = 0.5                                                      # 慢一点，来得及中止
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        for _ in range(40):
+            r = app_client.get(f'/api/runs/{run_id}').json()
+            if r['legs'] and r['legs'][0]['status'] in ('dispatched', 'navigating'):
+                break
+            time.sleep(0.25)
+        assert app_client.post(f'/api/runs/{run_id}/abort').status_code == 200
+        run = wait_run(app_client, run_id, timeout=20)
+        assert run['status'] == 'aborted'
+        assert mock_robot.snapshot_state()['task']['status'] in ('idle', 'stopped')
+        assert app_client.post(f'/api/runs/{run_id}/abort').status_code == 400   # 已结束
+    finally:
+        mock_robot.speed = 10.0
+
+
+def test_not_started_detected_when_robot_ignores_task(app_client, mock_robot):
+    """定位就绪但设备栈没跑（真机常见）：任务 200 却不动 → 执行器应识别为「任务未执行」而不是干等超时。"""
+    init_robot(app_client, '1')
+    mock_robot.device_started = False                     # 定位标志还在，但导航栈已停
+    tid = make_task(app_client, nodes=('5',))
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'], timeout=40)
+    assert run['status'] == 'failed' and '没有动' in run['error']
