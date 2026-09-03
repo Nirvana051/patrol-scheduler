@@ -101,3 +101,9 @@
 ## 02:05–02:30 定时计划
 - 新增定时执行：`schedules` 表（schema v3）+ 调度线程（每 20 s 检查到点计划）+ `/api/schedules` CRUD/立即触发 + 任务页「⏰ 定时」弹窗 + 总览「下次定时执行」。两种计划：每天固定时刻（多个 HH:MM）、每 N 分钟；到点时若已有执行在跑则跳过并记事件；不引入 cron 库。
 - 丢定位暂停用例的最后一条断言写错（机器人只走了 0.4 m，最近航点仍是 1），改为断言从重新定位时的最近航点重规划。
+
+## 02:30–02:55 人工改判、失败通知、CSV 导出
+- 检查记录加人工改判（schema v4：`human_passed/human_note/human_at`）：执行监控里每条检查可「判通过 / 判不通过 / 撤销」；统计按改判后的结果算并给出「改判数」；VLM 原结论保留，作为以后评测集的样本。
+- `NOTIFY_WEBHOOK_URL`：检查不通过 / 执行失败或中止时后台 POST JSON（用例：假 webhook 服务收到 inspection_failed 与 run_failed）。
+- 事件导出 CSV（全部或按执行），带 BOM 方便 Excel 打开。
+- 迁移测试的合成 v1 库缺 inspections 表导致 v4 ALTER 失败 → 夹具补齐。

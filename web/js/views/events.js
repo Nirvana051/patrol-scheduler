@@ -6,7 +6,7 @@ export async function render(root, { store }) {
     <select id="f-source" style="width:110px"><option value="">全部来源</option><option value="cloud">云端</option><option value="system">系统</option></select>
     <select id="f-type" style="width:180px"><option value="">全部类型</option></select>
     <select id="f-level" style="width:110px"><option value="">全部级别</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
-    <input id="f-run" placeholder="执行 #" style="width:90px"><input id="f-q" placeholder="搜索…" style="width:160px"><button class="btn" id="b-apply">筛选</button></div></div>
+    <input id="f-run" placeholder="执行 #" style="width:90px"><input id="f-q" placeholder="搜索…" style="width:160px"><button class="btn" id="b-apply">筛选</button><a class="btn" href="/api/events/export.csv" target="_blank">⬇ CSV</a></div></div>
   <div class="help" style="margin-bottom:8px">云端事件（到达航点/任务完成/失败/避障/丢定位/急停/上下线）与系统事件（下发、抓图、VLM、TTS、设置变更…）统一时间线，实时追加；云端只留 500 条内存，这里才是持久记录。</div>
   <div class="card tight"><div id="rows"></div><div style="text-align:center;padding:8px"><button class="btn btn-sm" id="b-more">加载更早的</button></div></div>`;
   const rows = root.querySelector('#rows');

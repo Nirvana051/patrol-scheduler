@@ -72,6 +72,13 @@ def test_full_mission_completes_with_inspections(app_client, mock_robot):
     assert run['summary'] == {'legs': 3, 'legs_done': 3, 'inspections': 3, 'passed': 2, 'failed': 1, 'unknown': 0}
     st = app_client.get('/api/stats?days=1').json()
     assert st['totals']['inspections'] == 3 and st['totals']['failed'] == 1 and any(w['pass_rate'] == 0 for w in st['per_waypoint'])
+    # 人工改判：把 VLM 判「不通过」的那条改成通过 → 统计跟着变，原结论保留
+    bad = next(i for i in insp if i['passed'] == 0)
+    r = app_client.put(f"/api/inspections/{bad['id']}/verdict", json={'passed': True, 'note': '门其实是关着的'})
+    assert r.status_code == 200 and r.json()['effective_passed'] == 1 and r.json()['passed'] == 0 and r.json()['human_note'] == '门其实是关着的'
+    st = app_client.get('/api/stats?days=1').json()
+    assert st['totals']['failed'] == 0 and sum(w['overturned'] for w in st['per_waypoint']) == 1
+    assert app_client.put(f"/api/inspections/{bad['id']}/verdict", json={'passed': None}).json()['effective_passed'] == 0
     # 机器人最终停在最后一个任务航点
     st = mock_robot.snapshot_state()
     assert abs(st['x'] - 32.0) < 0.2 and abs(st['y'] - 7.0) < 0.2   # 航点 43 = 东侧支路 (32, 7)

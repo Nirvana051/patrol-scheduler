@@ -150,6 +150,8 @@ class MissionRunner(threading.Thread):
         self._set_run(status=status, ended_at=now_iso(), error=error, summary=dumps(summary))
         self._log('run_finished', f"执行结束：{status}" + (f'（{error}）' if error else ''),
                   level='info' if status == 'completed' else 'warn', data=summary)
+        if status != 'completed':
+            self.ctx.notify('run_' + status, {'run_id': self.run_id, 'task': self.task.get('name'), 'error': error, 'summary': summary})
 
     def _safe_stop_task(self) -> None:
         try:

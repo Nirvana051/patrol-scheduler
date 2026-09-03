@@ -119,6 +119,24 @@ class AppContext:
             else:
                 self._graphs.pop(map_name, None)
 
+    # ── 通知 ────────────────────────────────────────────────────────────────
+    def notify(self, kind: str, payload: dict) -> None:
+        """检查不通过 / 执行失败中止 → POST 到 NOTIFY_WEBHOOK_URL（后台线程，失败只记日志）。"""
+        url = self.cfg.get('NOTIFY_WEBHOOK_URL')
+        if not url:
+            return
+
+        def go():
+            import requests
+            try:
+                r = requests.post(url, json={'kind': kind, 'robot': self.gateway.robot, 'mode': self.gateway.mode,
+                                             'ts': now_iso(), **payload}, timeout=8)
+                self.log_event('notify_sent' if r.ok else 'notify_failed', f'通知 {kind} → HTTP {r.status_code}',
+                               level='info' if r.ok else 'warn', run_id=payload.get('run_id'), data={'url': url})
+            except Exception as e:      # noqa: BLE001
+                self.log_event('notify_failed', f'通知 {kind} 发送失败：{e}', level='warn', run_id=payload.get('run_id'))
+        threading.Thread(target=go, name='notify', daemon=True).start()
+
     # ── 系统事件 ─────────────────────────────────────────────────────────────
     def log_event(self, etype: str, message: str, *, level: str = 'info', run_id: int | None = None,
                   leg_id: int | None = None, data=None) -> dict:

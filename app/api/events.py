@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import ctx_of
 from app.db import loads
@@ -36,3 +40,24 @@ def list_events(request: Request, before_id: int | None = None, after_id: int | 
         r['data'] = loads(r.get('data'), {})
     types = [r['type'] for r in c.db.query('SELECT DISTINCT type FROM events ORDER BY type')]
     return {'items': rows, 'types': types}
+
+
+@router.get('/export.csv')
+def export_csv(request: Request, run_id: int | None = None, source: str | None = None, limit: int = 20000):
+    c = ctx_of(request)
+    where, params = [], []
+    if run_id is not None:
+        where.append('run_id = ?'); params.append(run_id)
+    if source:
+        where.append('source = ?'); params.append(source)
+    sql = 'SELECT id, ts, source, type, cloud_seq, run_id, leg_id, level, message, data FROM events' + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY id LIMIT ?'
+    params.append(max(1, min(limit, 200000)))
+    rows = c.db.query(sql, params)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['id', 'ts', 'source', 'type', 'cloud_seq', 'run_id', 'leg_id', 'level', 'message', 'data'])
+    for r in rows:
+        w.writerow([r[k] for k in ('id', 'ts', 'source', 'type', 'cloud_seq', 'run_id', 'leg_id', 'level', 'message', 'data')])
+    name = f"events{'-run' + str(run_id) if run_id else ''}.csv"
+    return StreamingResponse(iter(['\ufeff' + buf.getvalue()]), media_type='text/csv; charset=utf-8',
+                             headers={'Content-Disposition': f'attachment; filename="{name}"'})

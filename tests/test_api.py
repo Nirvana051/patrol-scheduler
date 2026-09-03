@@ -112,6 +112,8 @@ def test_schema_migration_from_v1(tmp_path):
     c = sqlite3.connect(p)
     c.executescript('CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES (1);'
                     'CREATE TABLE run_legs(id INTEGER PRIMARY KEY, run_id INTEGER, seq INTEGER, status TEXT);'
+                    'CREATE TABLE inspections(id INTEGER PRIMARY KEY, run_id INTEGER, answer TEXT, passed INTEGER, created_at TEXT);'
+                    'CREATE TABLE tasks(id INTEGER PRIMARY KEY, name TEXT);'
                     'CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);')
     c.commit(); c.close()
     db = Database(p)
@@ -119,6 +121,7 @@ def test_schema_migration_from_v1(tmp_path):
     cols = {r['name'] for r in db.query('PRAGMA table_info(run_legs)')}
     assert 'item_seq' in cols
     assert db.query_one("SELECT name FROM sqlite_master WHERE type='table' AND name='schedules'")
+    assert 'human_passed' in {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
     db2 = Database(tmp_path / 'fresh.db')
     assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}
 
@@ -126,3 +129,10 @@ def test_schema_migration_from_v1(tmp_path):
 def test_stats_endpoint_empty(app_client):
     st = app_client.get('/api/stats').json()
     assert st['totals'] == {'inspections': 0, 'passed': 0, 'failed': 0, 'unknown': 0} and st['per_waypoint'] == []
+
+
+def test_events_csv_export(app_client):
+    r = app_client.get('/api/events/export.csv?source=system')
+    assert r.status_code == 200 and r.headers['content-type'].startswith('text/csv')
+    lines = r.text.lstrip('\ufeff').splitlines()
+    assert lines[0].startswith('id,ts,source,type') and any('app_started' in l for l in lines[1:])

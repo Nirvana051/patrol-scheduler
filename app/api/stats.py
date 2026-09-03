@@ -15,14 +15,15 @@ def stats(request: Request, days: int = 30):
     since = f"-{max(1, min(days, 3650))} days"
     per_wp = c.db.query(
         "SELECT task_waypoint_id, waypoint_name, COUNT(*) AS total, "
-        "SUM(CASE WHEN passed=1 THEN 1 ELSE 0 END) AS passed, SUM(CASE WHEN passed=0 THEN 1 ELSE 0 END) AS failed, "
-        "SUM(CASE WHEN passed IS NULL THEN 1 ELSE 0 END) AS unknown, MAX(created_at) AS last_at, AVG(latency_ms) AS avg_latency_ms "
+        "SUM(CASE WHEN COALESCE(human_passed, passed)=1 THEN 1 ELSE 0 END) AS passed, SUM(CASE WHEN COALESCE(human_passed, passed)=0 THEN 1 ELSE 0 END) AS failed, "
+        "SUM(CASE WHEN COALESCE(human_passed, passed) IS NULL THEN 1 ELSE 0 END) AS unknown, MAX(created_at) AS last_at, AVG(latency_ms) AS avg_latency_ms, "
+        "SUM(CASE WHEN human_passed IS NOT NULL AND human_passed != COALESCE(passed, -1) THEN 1 ELSE 0 END) AS overturned "
         "FROM inspections WHERE created_at >= datetime('now', 'localtime', ?) GROUP BY task_waypoint_id, waypoint_name ORDER BY failed DESC, total DESC", (since,))
     for r in per_wp:
         r['pass_rate'] = round(r['passed'] / r['total'], 3) if r['total'] else None
         r['avg_latency_ms'] = int(r['avg_latency_ms'] or 0)
     runs = c.db.query("SELECT status, COUNT(*) AS n FROM runs WHERE started_at >= datetime('now', 'localtime', ?) GROUP BY status", (since,))
-    recent_fail = c.db.query("SELECT id, run_id, waypoint_name, prompt, answer, created_at FROM inspections WHERE passed=0 ORDER BY id DESC LIMIT 10")
+    recent_fail = c.db.query("SELECT id, run_id, waypoint_name, prompt, answer, created_at FROM inspections WHERE COALESCE(human_passed, passed)=0 ORDER BY id DESC LIMIT 10")
     return {'days': days, 'per_waypoint': per_wp, 'runs': {r['status']: r['n'] for r in runs},
             'recent_failures': recent_fail,
             'totals': {'inspections': sum(r['total'] for r in per_wp), 'passed': sum(r['passed'] for r in per_wp),

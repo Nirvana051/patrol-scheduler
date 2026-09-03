@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 from app.api.deps import bad_request, ctx_of, not_found
-from app.db import loads
+from app.db import loads, now_iso
 
 router = APIRouter(tags=['runs'])
 
@@ -17,7 +18,13 @@ def _insp(r: dict, media='/media') -> dict:
     if r.get('image_path'):
         r['annot_url'] = f"{media}/{r['image_path'].replace('_pano.jpg', '_annot.jpg')}"
     r['tts_status'] = loads(r.get('tts_status'), r.get('tts_status'))
+    r['effective_passed'] = r['human_passed'] if r.get('human_passed') is not None else r.get('passed')
     return r
+
+
+class VerdictIn(BaseModel):
+    passed: bool | None = None          # None = 撤销改判
+    note: str = ''
 
 
 def _leg(r: dict) -> dict:
@@ -87,3 +94,20 @@ def control(run_id: int, action: str, request: Request):
         return c.runs.control(run_id, action)
     except ValueError as e:
         raise bad_request(str(e))
+
+
+@router.put('/api/inspections/{insp_id}/verdict')
+def set_verdict(insp_id: int, body: VerdictIn, request: Request):
+    """人工改判：以后统计按改判结果算；原 VLM 结论保留在 answer/passed 里作评测样本。"""
+    c = ctx_of(request)
+    r = c.db.query_one('SELECT * FROM inspections WHERE id=?', (insp_id,))
+    if not r:
+        raise not_found('检查记录不存在')
+    hp = None if body.passed is None else int(body.passed)
+    c.db.execute('UPDATE inspections SET human_passed=?, human_note=?, human_at=? WHERE id=?',
+                 (hp, body.note.strip() or None, now_iso() if hp is not None else None, insp_id))
+    c.log_event('inspection_verdict', f"人工改判检查 #{insp_id}「{r['waypoint_name']}」：" + ({None: '撤销改判', 1: '通过', 0: '不通过'}[hp]) + (f'（{body.note.strip()}）' if body.note.strip() else ''),
+                run_id=r['run_id'], leg_id=r['leg_id'], data={'inspection_id': insp_id, 'human_passed': hp, 'vlm_passed': r['passed']})
+    row = _insp(c.db.query_one('SELECT * FROM inspections WHERE id=?', (insp_id,)))
+    c.bus.publish('inspection', row)
+    return row

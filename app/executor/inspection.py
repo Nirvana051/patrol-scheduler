@@ -121,4 +121,7 @@ def _finish(ctx, row: dict, template: dict | None, name: str, t0: float) -> dict
     row['id'] = ctx.db.execute(f"INSERT INTO inspections({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
                                [row.get(c) for c in cols])
     ctx.bus.publish('inspection', row)
+    if row['passed'] == 0 or row['answer'] == 'error':
+        ctx.notify('inspection_failed', {'run_id': row['run_id'], 'inspection_id': row['id'], 'waypoint': name, 'prompt': row['prompt'],
+                                         'answer': row['answer'], 'tts_text': row['tts_text'], 'crop_path': row['crop_path']})
     return row

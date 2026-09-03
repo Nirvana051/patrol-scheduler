@@ -1,4 +1,4 @@
--- 巡检调度系统 SQLite 模式 v3（见 docs/task.md §4；增量迁移见 app/db.py）
+-- 巡检调度系统 SQLite 模式 v4（见 docs/task.md §4；增量迁移见 app/db.py）
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -111,6 +111,9 @@ CREATE TABLE IF NOT EXISTS inspections (
   passed           INTEGER,
   tts_text         TEXT, tts_audio_path TEXT, tts_status TEXT,
   latency_ms       INTEGER,
+  human_passed     INTEGER,                     -- 人工改判：1 通过 / 0 不通过 / NULL 未改判
+  human_note       TEXT,
+  human_at         TEXT,
   created_at       TEXT NOT NULL
 );
 

@@ -47,6 +47,7 @@ DEFAULTS: dict[str, str] = {
     'MAX_RETRIES': '1',
     'ESTOP_ON_EXCEPTION': '1',
     'SCHEDULE_TICK_SECONDS': '20',
+    'NOTIFY_WEBHOOK_URL': '',          # 检查不通过 / 执行失败中止时 POST JSON
 }
 
 # 网页「设置」里可改、存进 settings 表的键（密钥也允许改，但读出来一律掩码）
