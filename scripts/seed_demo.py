@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 
 import requests
 
@@ -48,6 +49,11 @@ def main() -> int:
         requests.post(a.mock.rstrip('/') + '/mock/speed', json={'speed': a.mock_speed}, timeout=5)
 
     print('同步地图 …', call('POST', f'/api/maps/{MAP}/sync'))
+    pcd = Path(__file__).resolve().parent.parent / 'mock_gateway' / 'fixtures' / 'map_demo_walls.pcd'
+    if pcd.exists():
+        with pcd.open('rb') as f:
+            r = requests.post(f'{B}/api/maps/{MAP}/pointcloud', files={'file': ('map_demo_walls.pcd', f, 'application/octet-stream')}, timeout=120)
+        print('上传演示点云 …', r.status_code, r.text[:120])
     existing = {t['name']: t for t in call('GET', f'/api/task-waypoints?map_name={MAP}')['items']}
     specs = [
         {'name': '3 号消防栓', 'nav_node_id': '20', 'angle_from': 190, 'angle_to': 232,

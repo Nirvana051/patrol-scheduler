@@ -15,6 +15,10 @@ export async function render(root, { store }) {
     <div>
       <div class="card"><h2>当前适配器</h2><dl class="kv"><dt>模式</dt><dd>${s.mode === 'real' ? badge('REAL 真机', 'warn') : badge('MOCK 仿真', 'ok')}</dd><dt>VLM</dt><dd class="mono">${esc(s.adapters.vlm)}</dd><dt>TTS</dt><dd class="mono">${esc(s.adapters.tts.engine)} → ${esc(s.adapters.tts.sinks.join(', '))}</dd><dt>抓图源</dt><dd class="mono">${esc(s.adapters.snapshot)}</dd><dt>事件监听</dt><dd>${s.events.connected ? badge(s.events.transport, 'ok') : badge('未连接', 'warn')} 游标 ${s.events.cursor ?? '—'}，已收 ${s.events.received}${s.events.last_error ? `<div class="small muted">${esc(s.events.last_error)}</div>` : ''}</dd></dl>
         <div class="form-inline" style="margin-top:10px"><input id="tts-text" value="消防栓门已关闭，检查通过。" style="width:260px"><button class="btn btn-sm" id="b-tts">▶ 试听 TTS</button></div><div id="tts-out" class="small muted" style="margin-top:4px"></div></div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><h2>机头校准（FORWARD_DEG）</h2><button class="btn btn-sm" id="cal-snap">📷 抓一张全景</button></div>
+        <div class="help">真机第一次抓图后，把蓝线拖到画面里机器人<b>正前方</b>所在的位置，保存后任务航点编辑器里的「相对机头」读数才准确。当前 ${esc(s.settings.FORWARD_DEG)}°。</div>
+        <div class="pano-stage" id="cal-stage" style="margin-top:8px;aspect-ratio:2/1"><img id="cal-img" alt="" draggable="false" style="display:none"><div class="pano-empty" id="cal-empty">先抓一张全景</div><div class="pano-forward" id="cal-line" style="left:${Number(s.settings.FORWARD_DEG) / 3.6}%;border-left-width:3px;pointer-events:none"><span>机头</span></div></div>
+        <div class="form-inline" style="margin-top:8px"><label class="small">机头角度 <input id="cal-deg" type="number" step="0.5" min="0" max="360" value="${esc(s.settings.FORWARD_DEG)}" style="width:100px"></label><button class="btn btn-sm btn-primary" id="cal-save">保存为 FORWARD_DEG</button></div></div>
       ${s.mode === 'mock' ? `<div class="card" style="margin-top:14px"><h2>演示场景（合成全景）</h2><label><input type="checkbox" id="scene-door" ${s.scene.door_open ? 'checked' : ''}> 消防栓柜门打开（让 VLM/TTS 走「不通过」分支的素材）</label><div class="help">只影响 synthetic 抓图源画出来的图。</div></div>` : ''}
       <div class="card" style="margin-top:14px"><h2>说明</h2><ul class="small" style="padding-left:18px;margin:0"><li>密钥永不回传前端，只显示掩码；不改就原样提交即可。</li><li>改 CX_* 会重建云端连接与监听线程（当前执行请先中止）。</li><li>状态码表来自 <span class="mono">GET /v1/status-codes</span>，不在本地维护。</li></ul></div>
     </div></div>`;
@@ -32,6 +36,17 @@ export async function render(root, { store }) {
     try { const r = await busy(e.currentTarget, () => api('/api/settings', { method: 'PUT', body })); toast(r.changed.length ? `已更新：${r.changed.join(', ')}${r.reconnected ? '（已重建连接）' : ''}` : '没有变化', 'ok'); if (r.changed.length) render(root, { store }); } catch (err) { toast(err.message, 'bad', 6000); }
   };
   root.querySelector('#b-tts').onclick = async (e) => { try { const r = await busy(e.currentTarget, () => api('/api/tts/test', { method: 'POST', body: { text: root.querySelector('#tts-text').value } })); root.querySelector('#tts-out').textContent = `引擎 ${r.engine}${r.audio_url ? ' · 已生成音频' : ' · 无音频（浏览器朗读）'} · ` + Object.entries(r.sinks).map(([k, v]) => `${k}: ${v}`).join('，') + (r.error ? ` · ${r.error}` : ''); } catch (err) { toast(err.message, 'bad'); } };
+  // 机头校准
+  const stage = root.querySelector('#cal-stage'), calLine = root.querySelector('#cal-line'), calDeg = root.querySelector('#cal-deg');
+  const setCal = (deg) => { deg = ((Number(deg) % 360) + 360) % 360; calLine.style.left = `${deg / 3.6}%`; calDeg.value = Math.round(deg * 10) / 10; };
+  let calDrag = false;
+  const calAngle = (e) => { const r = stage.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * 360; };
+  stage.addEventListener('pointerdown', e => { calDrag = true; stage.setPointerCapture(e.pointerId); setCal(calAngle(e)); });
+  stage.addEventListener('pointermove', e => { if (calDrag) setCal(calAngle(e)); });
+  stage.addEventListener('pointerup', () => { calDrag = false; });
+  calDeg.onchange = () => setCal(calDeg.value);
+  root.querySelector('#cal-snap').onclick = async (e) => { try { const r = await busy(e.currentTarget, () => api('/api/robot/snapshot', { method: 'POST' })); const img = root.querySelector('#cal-img'); img.src = r.url; img.style.display = ''; root.querySelector('#cal-empty').style.display = 'none'; } catch (err) { toast(err.message, 'bad', 6000); } };
+  root.querySelector('#cal-save').onclick = async (e) => { try { await busy(e.currentTarget, () => api('/api/settings', { method: 'PUT', body: { FORWARD_DEG: String(calDeg.value) } })); toast(`机头角度已保存：${calDeg.value}°`, 'ok'); } catch (err) { toast(err.message, 'bad'); } };
   const door = root.querySelector('#scene-door'); if (door) door.onchange = async () => { try { await api('/api/demo/scene', { method: 'POST', body: { door_open: door.checked } }); toast('场景已更新', 'ok'); } catch (err) { toast(err.message, 'bad'); } };
 }
 export function destroy() {}

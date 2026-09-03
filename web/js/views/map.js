@@ -43,6 +43,8 @@ export async function render(root, { store }) {
       state.data = await api(`/api/maps/${encodeURIComponent(name)}/waypoints`);
       mc.setData(state.data);
       const { items } = await api(`/api/task-waypoints?map_name=${encodeURIComponent(name)}`); state.tws = items; mc.setTaskWaypoints(items);
+      const mrow = [...listEl.querySelectorAll('.item')].find(i => i.dataset.m === name);
+      if (mrow && mrow.textContent.includes('有点云')) root.querySelector('#b-cloud').click(); else mc.setPointCloud(null);
       root.querySelector('#sel').innerHTML = `<div class="small">${state.data.waypoints.length} 个航点，${state.data.edges.length} 条边，${state.data.components} 个连通块 ${state.data.components > 1 ? badge('拓扑不连通！', 'warn') : ''}</div><div class="muted small">点一个航点查看/添加为任务航点</div>`;
     } catch (e) { mc.setData({ waypoints: [], edges: [], bounds: null }); root.querySelector('#sel').innerHTML = `<span class="muted">${esc(e.message)}</span>`; }
   };

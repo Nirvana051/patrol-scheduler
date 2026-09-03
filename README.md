@@ -4,7 +4,8 @@
 按「当前航点 → 下一个任务航点」分段下发巡检；到点后抓全景 → 按角度范围裁切 → VLM 判「是 / 不是」→ 按答案模版 TTS 播报。
 
 主管理文档（目标、宪法约束、架构、计划、进度、问题、规划）：`../Sample_web_api/docs/task.md`（同步副本 `docs/task.md`）。
-开发日志 `docs/DEVLOG.md`，问题清单 `docs/TODO.md`，路线图 `docs/ROADMAP.md`，变更记录 `CHANGELOG.md`。
+开发日志 `docs/DEVLOG.md`，问题清单 `docs/TODO.md`，路线图 `docs/ROADMAP.md`，变更记录 `CHANGELOG.md`，**真机上线手册 `docs/OPERATIONS.md`**。
+本系统自身的 REST 文档在运行时的 `/api/docs`（FastAPI 自动生成）。默认只绑定 127.0.0.1、无登录；要暴露到局域网请自行加反向代理与鉴权。
 
 ## 跑起来
 
@@ -18,7 +19,7 @@ cp config/env.example config/.env          # 填真机凭据；不填默认连�
 # 浏览器打开 http://127.0.0.1:8088
 ```
 
-真机：`config/.env` 里把 `CX_HOST/CX_ROBOT/CX_KEY` 换成真值，`SNAPSHOT_SOURCE=rtsp`，`./run.sh`。
+真机：`config/.env` 里把 `CX_HOST/CX_ROBOT/CX_KEY` 换成真值，`SNAPSHOT_SOURCE=rtsp`，先 `.venv/bin/python scripts/real_smoke.py`（只读冒烟），再 `./run.sh`。详见 `docs/OPERATIONS.md`。
 页面顶栏会显示 **REAL**，所有让机器人动的按钮都会二次确认。先在「总览」做 ② 启动设备 → ④ 定位，再执行任务。
 
 ## 测试

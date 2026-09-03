@@ -44,3 +44,12 @@
 - 排查：给用例加打印，看到第二个用例下发后 mock 里的任务 `path=[]`、`lease=None` —— **POST /task 根本没到处理函数**。原因是 mock 忠实复刻了云端的幂等重放：每个用例用全新的 DB，run id 都从 1 开始，幂等键 `ps-r1-l1-a1` 与上一个用例相同，10 分钟内同键 → 云端直接回放首次响应（200）而**不再执行**。执行器以为下发成功，等到 `not_started_timeout` 才判「没动」。
 - 这在真机上同样会发生：换 DB、重装、或两套调度系统对同一台机器人，都可能在 10 分钟窗口内撞键。修复：幂等键加入按 DB 生成一次的随机实例段 `ps-{instance}-r{run}-l{leg}-a{attempt}`（`settings.PS_INSTANCE_ID`）。
 - 教训写进 task.md C3。
+
+## 01:20–01:50 全绿 → v0.1.0；真机准备
+- 48 项测试全部通过，打 tag `v0.1.0`（mock 上端到端可用）。
+- 新增 `scripts/real_smoke.py`：拿到密钥后的只读冒烟，逐项核对本系统依赖的契约点（对 mock 跑：18 项通过、HLS 404 为预期）。
+- 新增 `docs/OPERATIONS.md` 真机上线手册：配置 → 只读冒烟 → 上游 04_verify_flow → 初始化 ②③④ → 任务航点/校准 → 执行看护 → 收尾 → 速查表。
+- 设置页加「机头校准」：抓一张全景，把蓝线拖到机器人正前方，保存 FORWARD_DEG（TODO T3 的处置手段）。
+- VLM 适配器测试：假 Anthropic 客户端（请求形状：image block + effort=low + fallbacks/betas；refusal → unknown；旧 SDK 无 fallbacks 参数时回退），假 OpenAI 兼容服务（Bearer、data URI、system prompt）。
+- 演示点云：按走廊两侧墙面生成 7.5 万点 PCD；上传 → 体素 0.3 m 下采样到 9.7 千点；地图页打开时自动加载。
+- `./run.sh --mock` 在备用端口实测：两进程都起来、退出时一起关掉。
