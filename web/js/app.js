@@ -68,7 +68,9 @@ function setStatus(s) {
   store.emit('robot_status', s);
   const L = document.getElementById('lights');
   const set = (k, cls, text) => { const el = L.querySelector(`[data-k=${k}]`); el.className = `light ${cls}`; el.lastChild.textContent = text; };
-  if (!s || s.reachable === false) { set('online', 'bad', '云端不可达'); }
+  if (!s || !s.ts) { for (const k of ['online', 'lease', 'estop', 'loc', 'task']) set(k, '', k === 'online' ? '状态获取中…' : ''); document.getElementById('topbar-pos').textContent = '—'; return; }
+  if (s.reachable === false) set('online', 'bad', '云端不可达');
+  else if (s.online === null || s.online === undefined) set('online', 'warn', '在线状态未知');
   else set('online', s.online ? 'ok' : 'bad', s.online ? '在线' : '离线');
   const lease = s?.lease;
   if (!lease) set('lease', '', '控制权空闲');
