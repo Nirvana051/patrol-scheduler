@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -72,9 +73,24 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
               stream.router, settings.router):
         app.include_router(r)
 
+    started_at = time.time()
+
     @app.get('/api/health')
     def health():
-        return {'ok': True, 'mode': ctx.gateway.mode, 'robot': ctx.gateway.robot, 'host': ctx.gateway.host}
+        media_bytes = 0
+        try:
+            media_bytes = sum(p.stat().st_size for p in ctx.media_dir.rglob('*') if p.is_file())
+        except OSError:
+            pass
+        st = ctx.status.get()
+        return {'ok': True, 'mode': ctx.gateway.mode, 'robot': ctx.gateway.robot, 'host': ctx.gateway.host,
+                'version': app.version, 'uptime_s': int(time.time() - started_at), 'db_version': ctx.db.version(),
+                'db_path': str(ctx.db.path), 'instance_id': ctx.instance_id,
+                'threads': {'status_poller': ctx.status.is_alive(), 'events_listener': ctx.events.is_alive()},
+                'events': ctx.events.state(), 'active_run': ctx.runs.active_info(),
+                'status_age_s': None if not st.get('ts') else round(time.time() - st['ts'], 1),
+                'media_bytes': media_bytes, 'rate_limiter_total': ctx.gateway.limiter.total,
+                'adapters': {'vlm': ctx.vlm.describe(), 'tts': ctx.tts.describe(), 'snapshot': ctx.snapshot.describe()}}
 
     app.mount('/media', StaticFiles(directory=str(ctx.media_dir)), name='media')
     if WEB_DIR.exists():
