@@ -223,6 +223,8 @@ GET/PUT /api/settings                       密钥掩码；改 CX_* 自动重建
 GET  /api/stats?days=30                     按任务航点的检查次数/通过率/平均耗时、执行状态统计、最近失败
 GET/POST /api/schedules ; PUT/DELETE /api/schedules/{id} ; POST /api/schedules/{id}/fire   定时计划
 GET  /api/health                            系统自检（版本/实例/DB 版本/线程/事件监听/媒体占用）
+GET  /api/export[?map_name=] ; POST /api/import {data, map_name?, overwrite}   任务航点/任务/定时计划 JSON 备份与恢复
+POST /api/task-waypoints/retarget {from_map, to_map, max_distance}   重建图后按 x,y 重定向到新地图最近导航航点
 POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜门开/关
 ```
 
@@ -254,7 +256,8 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 - 01:33 ruff 接入、`requirements.lock`、截图集。
 - 01:43 外部任务识别、幂等诚实失败、控制权重试可配、时间戳带时区、systemd 单元。
 - 02:05 丢定位「暂停 → 重定位 → 继续」流程、HLS 抓帧备选、按航点统计。
-- 02:30 定时计划（schema v3）。
+- 02:30 定时计划（schema v3）；02:55 人工改判（schema v4）、失败通知 webhook、CSV 导出；03:10 执行器复审；02:03 起通宵定时执行观察。
+- 02:20 VLM 评测脚本（人工复核当标注）、导出/导入、重建图重定向。
 
 ---
 
@@ -300,7 +303,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 6. 守护与运维：systemd 单元、自动清理 cron、日志轮转已就位；健康检查接入监控。
 
 **R3 判读质量（并行）**
-7. 真 VLM 评测集：每个任务航点收集若干参考图 + 人工标注「是/不是」，脚本批量跑 `test-vlm` 出准确率/误报率；据此调 prompt 与裁切范围、是否附整图。
+7. 真 VLM 评测：`scripts/eval_vlm.py` 已能用人工复核过的检查当标注重跑当前 VLM 算准确率/误判清单；后续：积累样本、对比 provider/prompt/是否附整图。
 8. 等距投影 → 透视重投影（py360convert）再给模型；对比评测。
 9. 结果统计与人工改判已有第一版（按航点通过率、改判入库）；后续：改判样本导出为评测集、误报回看视图。
 
@@ -312,5 +315,5 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 
 **R5 与现场系统打通**
 14. 机器狗端播报：与 `robot-audio` ZMQ 服务对接 `play_tts`（T2）。
-15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；多地图切换与重建图后的任务航点迁移工具。
+15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；重建图后的任务航点迁移工具已有（导出/导入 + 按 x,y 重定向到新图最近航点），后续做 UI 引导与差异预览。
 16. 巡检模板库：常见点位（消防栓、通道、配电箱、指示牌）的 prompt/答案模版可复用。
