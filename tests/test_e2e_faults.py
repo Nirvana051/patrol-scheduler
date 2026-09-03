@@ -182,6 +182,6 @@ def test_lost_localization_pauses_until_relocalized(app_client, mock_robot):
         run = wait_run(app_client, run_id, timeout=60)
         assert run['status'] == 'completed' and run['legs'][0]['status'] == 'done'
         assert run['legs'][0]['attempt'] == 2 and run['legs'][0]['idempotency_key'].endswith('-a2')   # 重新下发必须换新幂等键
-        assert run['legs'][0]['from_node'] not in (None, '1') or run['legs'][0]['path'][0] != '1'  # 从当前位置重规划
+        assert run['legs'][0]['from_node'] == near and run['legs'][0]['path'][0] == near   # 从重新定位时的最近航点重规划
     finally:
         mock_robot.speed = 10.0

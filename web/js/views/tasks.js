@@ -5,20 +5,26 @@ let offs = [];
 export async function render(root, { store }) {
   root.innerHTML = `<div class="page-head"><h1>任务规划</h1><div class="actions"><button class="btn btn-primary" id="b-new">＋ 新建任务</button></div></div>
   <div class="help" style="margin-bottom:10px">任务 = 地图 + 有序的任务航点 + 执行选项。执行时按「当前航点 → 下一个任务航点」分段下发云端任务（机器狗不能在航点暂停），每段到达后做检查。</div>
-  <div class="table-wrap"><table><thead><tr><th>#</th><th>任务</th><th>地图</th><th>航点数</th><th>速度/步态/避障</th><th>最近执行</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  <div class="table-wrap"><table><thead><tr><th>#</th><th>任务</th><th>地图</th><th>航点数</th><th>速度/步态/避障</th><th>定时</th><th>最近执行</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
   const codes = store.statusCodes;
   const nameOf = (group, v) => { const arr = codes?.control?.[group] || []; const f = arr.find(x => x.code === Number(v)); return f ? f.zh : (v ?? '默认'); };
   const load = async () => {
     const { items } = await api('/api/tasks');
+    let scheds = [];
+    try { scheds = (await api('/api/schedules')).items; } catch { /* ignore */ }
+    const schedOf = id => scheds.filter(x => x.task_id === id);
+    const schedText = id => { const ss = schedOf(id); if (!ss.length) return '<span class="muted">—</span>'; return ss.map(x => `<div class="small">${x.enabled ? '⏰' : '⏸'} ${x.kind === 'daily' ? `每天 ${esc(x.spec)}` : `每 ${esc(x.spec)} 分钟`}${x.enabled && x.next_run_at ? `<div class="muted">下次 ${fmt.dt(x.next_run_at)}</div>` : ''}</div>`).join(''); };
     const tb = root.querySelector('#rows');
     tb.innerHTML = items.length ? items.map(t => `<tr data-id="${t.id}"><td class="muted">${t.id}</td><td><b>${esc(t.name)}</b><div class="small muted">${esc(t.description || '')}</div></td><td class="mono small">${esc(t.map_name)}</td><td>${t.item_count}</td>
       <td class="small">${t.options.speed == null ? '默认' : nameOf('speed', t.options.speed)} / ${t.options.gait == null ? '默认' : nameOf('gait', t.options.gait)} / ${t.options.obs_mode == null ? '默认' : nameOf('obsMode', t.options.obs_mode)}</td>
+      <td>${schedText(t.id)}</td>
       <td>${t.last_status ? `${statusBadge(RUN_STATUS, t.last_status)} <span class="small muted">${fmt.dt(t.last_started)}</span>` : '<span class="muted">—</span>'}</td>
-      <td class="right" style="white-space:nowrap"><button class="btn btn-xs btn-primary" data-a="run">▶ 执行</button> <button class="btn btn-xs" data-a="plan">路线</button> <button class="btn btn-xs" data-a="edit">编辑</button> <button class="btn btn-xs btn-danger" data-a="del">删除</button></td></tr>`).join('') : '<tr><td colspan="7" class="empty">还没有任务。先在「任务航点」页定义巡检点，再新建任务把它们按顺序加进来。</td></tr>';
+      <td class="right" style="white-space:nowrap"><button class="btn btn-xs btn-primary" data-a="run">▶ 执行</button> <button class="btn btn-xs" data-a="plan">路线</button> <button class="btn btn-xs" data-a="sched">⏰ 定时</button> <button class="btn btn-xs" data-a="edit">编辑</button> <button class="btn btn-xs btn-danger" data-a="del">删除</button></td></tr>`).join('') : '<tr><td colspan="8" class="empty">还没有任务。先在「任务航点」页定义巡检点，再新建任务把它们按顺序加进来。</td></tr>';
     tb.querySelectorAll('tr[data-id]').forEach(tr => {
       const id = Number(tr.dataset.id);
       tr.querySelector('[data-a=edit]').onclick = async () => openTaskEditor(await api(`/api/tasks/${id}`), load);
       tr.querySelector('[data-a=plan]').onclick = () => showPlan(id);
+      tr.querySelector('[data-a=sched]').onclick = () => openScheduleEditor(id, schedOf(id), load);
       tr.querySelector('[data-a=run]').onclick = (e) => runTask(id, e.currentTarget, store);
       tr.querySelector('[data-a=del]').onclick = async () => { if (!(await confirmDialog({ title: '删除任务', danger: true, okText: '删除', body: '删除该任务（不会删除任务航点，执行记录保留）？' }))) return; try { await api(`/api/tasks/${id}`, { method: 'DELETE' }); load(); } catch (e) { toast(e.message, 'bad'); } };
     });
@@ -88,4 +94,27 @@ export async function openTaskEditor(task, onSaved) {
     if (!d.name) return toast('名称必填', 'warn'); if (!d.waypoint_ids.length) return toast('至少加入一个任务航点', 'warn');
     try { await busy(e.currentTarget, () => t.id ? api(`/api/tasks/${t.id}`, { method: 'PUT', body: d }) : api('/api/tasks', { method: 'POST', body: d })); toast('已保存', 'ok'); m.close(); onSaved && onSaved(); } catch (err) { toast(err.message, 'bad', 5000); }
   };
+}
+
+
+async function openScheduleEditor(taskId, existing, onSaved) {
+  const list = h(`<div><div id="s-list"></div>
+    <fieldset style="margin-top:10px"><legend>新增计划</legend><div class="form-inline">
+      <select id="s-kind" style="width:150px"><option value="daily">每天固定时刻</option><option value="interval">每 N 分钟</option></select>
+      <input id="s-spec" placeholder="07:00,19:30" style="width:200px">
+      <button class="btn btn-primary btn-sm" id="s-add">添加</button></div>
+      <div class="help">daily 填一个或多个 HH:MM（逗号分隔）；interval 填分钟数。到点时若已有执行在跑会跳过并记事件；执行前照常做前置检查。</div></fieldset></div>`);
+  const m = modal({ title: '定时计划', content: list });
+  const $ = s => list.querySelector(s);
+  const paint = async () => {
+    const items = (await api(`/api/schedules?task_id=${taskId}`)).items;
+    $('#s-list').innerHTML = items.length ? `<table><thead><tr><th>类型</th><th>时刻/间隔</th><th>状态</th><th>下次</th><th>上次结果</th><th></th></tr></thead><tbody>${items.map(x => `<tr><td>${x.kind === 'daily' ? '每天' : '间隔'}</td><td class="mono">${esc(x.spec)}</td><td>${x.enabled ? badge('启用', 'ok') : badge('停用')}</td><td class="small">${x.enabled ? fmt.dt(x.next_run_at) : '—'}</td><td class="small muted">${esc(x.last_result || '')}${x.last_run_at ? ` · ${fmt.dt(x.last_run_at)}` : ''}</td><td class="right" style="white-space:nowrap"><button class="btn btn-xs" data-t="${x.enabled ? 0 : 1}" data-id="${x.id}" data-kind="${x.kind}" data-spec="${esc(x.spec)}">${x.enabled ? '停用' : '启用'}</button> <button class="btn btn-xs" data-fire="${x.id}">立即执行</button> <button class="btn btn-xs btn-danger" data-del="${x.id}">删除</button></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">该任务还没有定时计划</div>';
+    $('#s-list').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await api(`/api/schedules/${b.dataset.del}`, { method: 'DELETE' }); paint(); onSaved && onSaved(); });
+    $('#s-list').querySelectorAll('[data-t]').forEach(b => b.onclick = async () => { try { await api(`/api/schedules/${b.dataset.id}`, { method: 'PUT', body: { task_id: taskId, kind: b.dataset.kind, spec: b.dataset.spec, enabled: b.dataset.t === '1' } }); paint(); onSaved && onSaved(); } catch (e) { toast(e.message, 'bad'); } });
+    $('#s-list').querySelectorAll('[data-fire]').forEach(b => b.onclick = async () => { if (!(await confirmDialog({ title: '立即执行', okText: '执行', body: '按这个计划立刻开始一次执行（机器人会动）。' }))) return; try { const r = await busy(b, () => api(`/api/schedules/${b.dataset.fire}/fire`, { method: 'POST' })); toast(r.fired ? '已开始执行' : `未执行：${r.schedule.last_result}`, r.fired ? 'ok' : 'warn'); paint(); } catch (e) { toast(e.message, 'bad'); } });
+  };
+  $('#s-kind').onchange = () => { $('#s-spec').placeholder = $('#s-kind').value === 'daily' ? '07:00,19:30' : '120'; };
+  $('#s-add').onclick = async (e) => { try { await busy(e.currentTarget, () => api('/api/schedules', { method: 'POST', body: { task_id: taskId, kind: $('#s-kind').value, spec: $('#s-spec').value.trim(), enabled: true } })); $('#s-spec').value = ''; paint(); onSaved && onSaved(); } catch (err) { toast(err.message, 'bad', 5000); } };
+  await paint();
+  return m;
 }

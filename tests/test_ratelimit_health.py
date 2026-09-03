@@ -16,7 +16,7 @@ def test_rate_limiter_paces_requests():
 def test_health_endpoint_is_a_self_check(app_client):
     h = app_client.get('/api/health').json()
     assert h['ok'] and h['db_version'] >= 2 and len(h['instance_id']) == 6
-    assert h['threads'] == {'status_poller': True, 'events_listener': True}
+    assert h['threads'] == {'status_poller': True, 'events_listener': True, 'scheduler': True}
     assert 'vlm' in h['adapters'] and h['media_bytes'] >= 0
 
 

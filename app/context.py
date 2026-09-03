@@ -18,6 +18,7 @@ from app.robot.client import RobotGateway
 from app.robot.events import CloudEventListener
 from app.robot.ops import RobotOps
 from app.robot.status import StatusPoller
+from app.scheduler import ScheduleRunner
 from app.tts.base import build_tts
 from app.vlm.base import build_provider
 
@@ -49,6 +50,7 @@ class AppContext:
         self.ops = RobotOps(self)
         self.runs = RunManager(self)
         self.pointclouds = PointCloudProvider(self.media_dir / 'pointclouds')
+        self.schedules = ScheduleRunner(self, tick_seconds=cfg.get_float('SCHEDULE_TICK_SECONDS'))
 
     # ── 装配 ────────────────────────────────────────────────────────────────
     def _build_gateway(self) -> None:
@@ -83,8 +85,12 @@ class AppContext:
             self.status.start()
         if not self.events.is_alive():
             self.events.start()
+        if not self.schedules.is_alive():
+            self.schedules.start()
 
     def stop(self) -> None:
+        if getattr(self, 'schedules', None):
+            self.schedules.stop()
         if getattr(self, 'runs', None):
             self.runs.shutdown()
         if self.status:

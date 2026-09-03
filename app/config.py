@@ -46,6 +46,7 @@ DEFAULTS: dict[str, str] = {
     'LEG_TIMEOUT': '600',
     'MAX_RETRIES': '1',
     'ESTOP_ON_EXCEPTION': '1',
+    'SCHEDULE_TICK_SECONDS': '20',
 }
 
 # 网页「设置」里可改、存进 settings 表的键（密钥也允许改，但读出来一律掩码）

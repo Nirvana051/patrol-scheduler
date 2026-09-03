@@ -55,7 +55,11 @@ export async function render(root, { store }) {
 
   const paintRun = async (info) => {
     const box = root.querySelector('#d-run'), st = root.querySelector('#d-rstate');
-    if (!info) { box.innerHTML = '<div class="muted">没有进行中的执行</div>'; st.innerHTML = ''; return; }
+    if (!info) {
+      let next = '';
+      try { const ss = (await api('/api/schedules')).items.filter(x => x.enabled && x.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at)); if (ss.length) next = `<div class="small muted" style="margin-top:6px">⏰ 下次定时执行：<b>${esc(ss[0].task_name)}</b> ${fmt.dt(ss[0].next_run_at)}</div>`; } catch { /* ignore */ }
+      box.innerHTML = '<div class="muted">没有进行中的执行</div>' + next; st.innerHTML = ''; return;
+    }
     try {
       const r = await api(`/api/runs/${info.run_id}`);
       st.innerHTML = statusBadge(RUN_STATUS, r.status);

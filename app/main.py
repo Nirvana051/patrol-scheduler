@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import events, maps, robot, runs, settings, stats, stream, task_waypoints, tasks
+from app.api import events, maps, robot, runs, schedules, settings, stats, stream, task_waypoints, tasks
 from app.config import Config
 from app.context import AppContext
 from app.db import Database
@@ -70,7 +70,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
         return JSONResponse({'detail': str(exc)}, status_code=400)
 
     for r in (robot.router, maps.router, task_waypoints.router, tasks.router, runs.router, events.router,
-              stream.router, settings.router, stats.router):
+              stream.router, settings.router, stats.router, schedules.router):
         app.include_router(r)
 
     started_at = time.time()
@@ -86,7 +86,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
         return {'ok': True, 'mode': ctx.gateway.mode, 'robot': ctx.gateway.robot, 'host': ctx.gateway.host,
                 'version': app.version, 'uptime_s': int(time.time() - started_at), 'db_version': ctx.db.version(),
                 'db_path': str(ctx.db.path), 'instance_id': ctx.instance_id,
-                'threads': {'status_poller': ctx.status.is_alive(), 'events_listener': ctx.events.is_alive()},
+                'threads': {'status_poller': ctx.status.is_alive(), 'events_listener': ctx.events.is_alive(), 'scheduler': ctx.schedules.is_alive()},
                 'events': ctx.events.state(), 'active_run': ctx.runs.active_info(),
                 'status_age_s': None if not st.get('ts') else round(time.time() - st['ts'], 1),
                 'media_bytes': media_bytes, 'rate_limiter_total': ctx.gateway.limiter.total,

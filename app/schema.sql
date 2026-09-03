@@ -1,4 +1,4 @@
--- 巡检调度系统 SQLite 模式 v2（见 docs/task.md §4；增量迁移见 app/db.py）
+-- 巡检调度系统 SQLite 模式 v3（见 docs/task.md §4；增量迁移见 app/db.py）
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -131,3 +131,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_cloud_seq ON events(cloud_seq) WHERE cl
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id);
 CREATE INDEX IF NOT EXISTS inspections_run ON inspections(run_id);
 CREATE INDEX IF NOT EXISTS run_legs_run ON run_legs(run_id);
+
+-- 定时计划：daily = 每天固定时刻（"07:00,19:30"），interval = 每 N 分钟
+CREATE TABLE IF NOT EXISTS schedules (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                     -- daily | interval
+  spec        TEXT NOT NULL,                     -- "07:00,19:30" 或 "120"
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  last_result TEXT,
+  next_run_at TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);

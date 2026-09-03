@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def now_iso() -> str:
@@ -101,6 +101,12 @@ class Database:
         if v < 2:
             c.execute('ALTER TABLE run_legs ADD COLUMN item_seq INTEGER')
             c.execute('INSERT INTO schema_version(version) VALUES (2)')
+        if v < 3:
+            c.execute('''CREATE TABLE IF NOT EXISTS schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL, spec TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+                last_run_at TEXT, last_result TEXT, next_run_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
+            c.execute('INSERT INTO schema_version(version) VALUES (3)')
 
     def version(self) -> int:
         row = self.conn().execute('SELECT MAX(version) AS v FROM schema_version').fetchone()
