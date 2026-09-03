@@ -115,11 +115,11 @@ run_legs(id, run_id FK, seq, task_waypoint_id, from_node, to_node, path JSON, id
          status, attempt, dispatched_at, arrived_at, ended_at, cloud_task JSON, error)
 inspections(id, run_id, leg_id, task_waypoint_id, waypoint_name, prompt, angle_from, angle_to,
             image_path, crop_path, vlm_provider, vlm_raw, answer, expected, passed,
-            tts_text, tts_audio_path, tts_status, latency_ms, human_passed, human_note, human_at (v4), created_at)
+            tts_text, tts_audio_path, tts_status, latency_ms, human_passed, human_note, human_at (v4), capture_pose JSON (v5), created_at)
 events(id, ts, source cloud|system, type, cloud_seq UNIQUE, run_id, leg_id, level, message, data JSON)
 schedules(id, task_id FK, kind daily|interval, spec, enabled, last_run_at, last_result, next_run_at, created_at, updated_at)  — v3
 ```
-schema 版本 v4：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁移（`app/db.py`）。
+schema 版本 v5：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁移（`app/db.py`）。
 
 `answer_template` 示例：
 ```json
@@ -238,11 +238,11 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | P1 mock 网关 | 22:30–23:00 | 契约仿真 + 运动学 + 事件流 + 故障注入；curl 逐项验证 | ✅ |
 | P2 后端核心 | 22:40–23:00 | DB、SDK 包装、事件监听、状态轮询、规划、执行器、检查流水线、VLM/TTS 适配器、REST/SSE | ✅ |
 | P3 前端 | 22:45–23:10 | 七个视图、全景角度编辑器、地图画布、SSE 实时 | ✅ 截图验收 |
-| P4 测试 | 23:00–01:15 | 单测 + mock 契约 + API + 端到端；查出并修复幂等键撞键、测试互相污染 | ✅ 48 → 68+ 用例全绿 |
-| P5 加固 | 01:15–02:00 | 掉线/停滞/控制权/暂停跳过/丢定位场景；从失败段重跑；schema v2 迁移；事件归属；外部任务识别；机头校准；系统自检；清理脚本 | ✅ |
+| P4 测试 | 23:00–01:15 | 单测 + mock 契约 + API + 端到端；查出并修复幂等键撞键、测试互相污染 | ✅ 48 → 89 用例全绿 |
+| P5 加固与扩展 | 01:15–03:00 | 掉线/停滞/控制权/暂停跳过/丢定位场景；从失败段重跑；事件归属；外部任务识别；机头校准；系统自检；定时计划；人工改判；通知；导出导入/重定向；评测与备份脚本；schema v2→v5 增量迁移 | ✅ |
 | P6 真机准备与收尾 | 01:15–08:00 | 只读冒烟脚本、上线手册、截图集、lint/lock、systemd、文档与规划 | ✅ |
 
-**交付物**：`/home/leo/agent/scheduler/`（git，tag `v0.1.0`、`v0.2.0`），约 3.7k 行后端 + 1.0k 行 mock + 1.1k 行前端 + 1.1k 行测试（66 个用例，2 分钟跑完）+ 0.5k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
+**交付物**：`/home/leo/agent/scheduler/`（git，tag `v0.1.0`、`v0.2.0`），约 4.5k 行后端 + 1.0k 行 mock + 1.3k 行前端 + 1.7k 行测试（89 个用例，约 2.5 分钟跑完）+ 0.9k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
 
 **关键时间线**（细节见 `scheduler/docs/DEVLOG.md`）：
 - 22:05 宪法读完，确认无真机密钥；`GET /v1`、`/v1/status-codes` 免鉴权抓取存为 mock 夹具。
