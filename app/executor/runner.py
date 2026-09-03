@@ -327,7 +327,7 @@ class MissionRunner(threading.Thread):
                     t, d = ev.get('type'), ev.get('data') or {}
                     if t == 'waypoint_reached':
                         progress = True
-                        last_progress = now_ev = time.time()
+                        last_progress = time.time()
                         prog = {'last_reached': d.get('waypoint'), 'index': d.get('index'), 'total': d.get('total'), 'next': d.get('nextTarget')}
                         if leg['status'] != 'navigating':
                             self._set_leg(leg, status='navigating', cloud_task=dumps(prog))

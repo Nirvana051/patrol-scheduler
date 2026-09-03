@@ -79,6 +79,11 @@ def main() -> int:
         r = call('POST', '/api/task-waypoints', json={**s, 'map_name': MAP})
         ids.append(r['id'])
         print(f"任务航点 #{r['id']} {r['name']} @ 航点 {r['nav_node_id']} ({r['x']:.1f},{r['y']:.1f})")
+    # 给还没有参考图的任务航点抓一张（合成源），任务航点表与编辑器里就有图可看
+    for tw in call('GET', f'/api/task-waypoints?map_name={MAP}')['items']:
+        if tw['id'] in ids and not tw.get('reference_image'):
+            r = call('POST', f"/api/task-waypoints/{tw['id']}/reference-image")
+            print(f"参考图 #{tw['id']} {tw['name']}: {r['width']}x{r['height']}")
     tasks = {t['name']: t for t in call('GET', '/api/tasks')['items']}
     if '一层夜间巡检（演示）' in tasks:
         task = call('GET', f"/api/tasks/{tasks['一层夜间巡检（演示）']['id']}")

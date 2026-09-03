@@ -25,9 +25,11 @@ cp config/env.example config/.env          # 填真机凭据；不填默认连�
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest              # 单测 + mock 契约 + API + 端到端执行（约 1–2 分钟）
+.venv/bin/python -m pytest              # 单测 + mock 契约 + API + 端到端执行（约 2 分钟）
+.venv/bin/python -m ruff check .         # 静态检查（ruff.toml）
 scripts/ui_screenshots.sh                # 无头 Chrome 截图每个视图并收集 JS 错误（需调度系统在跑）
 ```
+依赖精确版本见 `requirements.lock`（`pip3 --python .venv/bin/python freeze --local` 生成）。
 
 ## 目录
 

@@ -1,0 +1,6 @@
+# 代码检查：.venv/bin/python -m ruff check .
+line-length = 140
+target-version = "py310"
+[lint]
+select = ["E9", "F", "B006"]
+ignore = ["F401"]          # __init__/兼容导出里有意的未使用导入
