@@ -188,3 +188,18 @@ def test_run_control_on_finished_run_is_400(app_client):
     assert app_client.post('/api/runs/9999/pause').status_code == 400
     assert app_client.post('/api/runs/9999/nonsense').status_code == 400
     assert app_client.get('/api/runs/9999').status_code == 404
+
+
+def test_stale_runs_marked_aborted_on_startup(make_client):
+    from app.db import now_iso
+
+    def prepare(db):
+        rid = db.execute("INSERT INTO runs(task_id,task_name,map_name,status,mode,total_legs,started_at) VALUES(1,'残留','m','running','mock',1,?)", (now_iso(),))
+        db.execute("INSERT INTO run_legs(run_id,seq,waypoint_name,to_node,status,attempt) VALUES(?,1,'x','5','inspecting',1)", (rid,))
+        db.execute("INSERT INTO runs(task_id,task_name,map_name,status,mode,total_legs,started_at,ended_at) VALUES(1,'正常','m','completed','mock',1,?,?)", (now_iso(), now_iso()))
+    c = make_client(prepare)
+    runs = {r['task_name']: r for r in c.get('/api/runs').json()['items']}
+    assert runs['残留']['status'] == 'aborted' and '进程重启' in runs['残留']['error'] and runs['正常']['status'] == 'completed'
+    legs = c.get(f"/api/runs/{runs['残留']['id']}").json()['legs']
+    assert legs[0]['status'] == 'aborted' and legs[0]['ended_at']
+    assert c.get('/api/events?type=runs_reconciled').json()['items']

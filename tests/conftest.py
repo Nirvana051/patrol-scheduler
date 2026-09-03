@@ -52,8 +52,16 @@ def mock_robot(mock_gw):
     return mock_gw.robot
 
 
+def _test_env(mock_gw, tmp_path) -> dict:
+    return {'CX_HOST': mock_gw.url, 'CX_ROBOT': mock_gw.alias, 'CX_KEY': mock_gw.key,
+           'PS_DATA_DIR': str(tmp_path / 'data'), 'PS_DB_PATH': str(tmp_path / 'data' / 'test.db'),
+           'TTS_ENGINE': 'none', 'TTS_SINKS': 'browser', 'VLM_PROVIDER': 'mock', 'VLM_MOCK_ANSWER': 'alternate',
+           'SNAPSHOT_SOURCE': 'synthetic', 'STATUS_POLL_ACTIVE': '1', 'STATUS_POLL_IDLE': '1', 'RATE_LIMIT_RPS': '20'}
+
+
 @pytest.fixture()
-def app_client(mock_gw, tmp_path, monkeypatch):
+def make_client(mock_gw, tmp_path, monkeypatch):
+    """构造调度系统 TestClient；prepare(db) 可在应用启动前预置数据（测启动时的对账逻辑）。"""
     from fastapi.testclient import TestClient
     from app.config import Config
     from app.db import Database
@@ -61,19 +69,30 @@ def app_client(mock_gw, tmp_path, monkeypatch):
 
     mock_gw.robot.reset()                                   # 每个用例从「未初始化、站在航点 1」开始，与用例顺序无关
     mock_gw.robot.teleport(node_id='1', map_name=DEMO_MAP)
-    env = {'CX_HOST': mock_gw.url, 'CX_ROBOT': mock_gw.alias, 'CX_KEY': mock_gw.key,
-           'PS_DATA_DIR': str(tmp_path / 'data'), 'PS_DB_PATH': str(tmp_path / 'data' / 'test.db'),
-           'TTS_ENGINE': 'none', 'TTS_SINKS': 'browser', 'VLM_PROVIDER': 'mock', 'VLM_MOCK_ANSWER': 'alternate',
-           'SNAPSHOT_SOURCE': 'synthetic', 'STATUS_POLL_ACTIVE': '1', 'STATUS_POLL_IDLE': '1', 'RATE_LIMIT_RPS': '20'}
-    for k, v in env.items():
+    for k, v in _test_env(mock_gw, tmp_path).items():
         monkeypatch.setenv(k, v)
-    cfg = Config(env_file=tmp_path / 'no.env')
-    db = Database(cfg.db_path)
-    app = create_app(cfg, db)
-    with TestClient(app) as c:
+    created = []
+
+    def _make(prepare=None):
+        cfg = Config(env_file=tmp_path / 'no.env')
+        db = Database(cfg.db_path)
+        if prepare:
+            prepare(db)
+        app = create_app(cfg, db)
+        c = TestClient(app)
+        c.__enter__()
         c.ctx = app.state.ctx
-        yield c
-    app.state.ctx.stop()          # 含 runs.shutdown()：中止残留执行，避免污染下一个用例（共享 mock 机器人）
+        created.append(c)
+        return c
+    yield _make
+    for c in created:
+        c.__exit__(None, None, None)
+        c.ctx.stop()          # 含 runs.shutdown()：中止残留执行，避免污染下一个用例（共享 mock 机器人）
+
+
+@pytest.fixture()
+def app_client(make_client):
+    return make_client()
 
 
 def mock_state(client) -> dict:

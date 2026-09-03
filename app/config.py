@@ -39,6 +39,7 @@ DEFAULTS: dict[str, str] = {
     'TTS_SINKS': 'browser',           # browser,local,zmq,webhook
     'TTS_ZMQ_ENDPOINT': 'tcp://192.168.41.2:5555',
     'TTS_WEBHOOK_URL': '',
+    'TTS_TIMEOUT': '20',              # 合成超时（秒）：外部服务卡住不能拖住执行
     # 抓图 / 全景
     'SNAPSHOT_SOURCE': 'synthetic',   # rtsp | hls | synthetic | file:<path> | lavfi:<filter> | http(s)://…m3u8
     'FORWARD_DEG': '180',

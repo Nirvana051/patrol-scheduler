@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import shlex
 import shutil
 import subprocess
@@ -37,15 +38,17 @@ class NullEngine(TtsEngine):
 class EdgeTtsEngine(TtsEngine):
     name = 'edge'
 
-    def __init__(self, voice: str = 'zh-CN-XiaoxiaoNeural') -> None:
+    def __init__(self, voice: str = 'zh-CN-XiaoxiaoNeural', timeout: float = 20.0) -> None:
         self.voice = voice
+        self.timeout = timeout
 
     def synthesize(self, text, out_path):
         import edge_tts
 
         async def go():
             await edge_tts.Communicate(text, self.voice).save(str(out_path))
-        asyncio.run(go())
+        # 微软的接口偶尔会卡住不返回：不设超时会把整条执行线程挂死（通宵观察里真的发生了）
+        asyncio.run(asyncio.wait_for(go(), timeout=self.timeout))
         return out_path if out_path.exists() and out_path.stat().st_size > 0 else None
 
 
@@ -151,12 +154,23 @@ class WebhookSink(AudioSink):
 
 
 class TtsService:
-    def __init__(self, engine: TtsEngine, sinks: list[AudioSink], media_dir: Path, url_prefix: str = '/media') -> None:
+    def __init__(self, engine: TtsEngine, sinks: list[AudioSink], media_dir: Path, url_prefix: str = '/media',
+                 timeout: float = 20.0) -> None:
         self.engine = engine
         self.sinks = sinks
         self.media_dir = Path(media_dir)
         self.url_prefix = url_prefix
+        self.timeout = float(timeout)
         self.lock = threading.Lock()
+        # 合成放到工作线程里、带上限等待：即使引擎本身不理会取消，也不能拖住执行器
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='tts')
+
+    def _synthesize(self, text: str, out_path: Path) -> Path | None:
+        fut = self._pool.submit(self.engine.synthesize, text, out_path)
+        try:
+            return fut.result(timeout=self.timeout + 1.0)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(f'合成超时（>{self.timeout:.0f}s）')
 
     def describe(self) -> dict:
         return {'engine': self.engine.name, 'sinks': [s.name for s in self.sinks]}
@@ -174,7 +188,9 @@ class TtsService:
             d.mkdir(parents=True, exist_ok=True)
             stem = f"tts_{time.strftime('%Y%m%d_%H%M%S')}_{int((time.time() % 1) * 1000):03d}"
             try:
-                audio_path = self.engine.synthesize(text, d / f'{stem}.{self.engine.ext}')
+                audio_path = self._synthesize(text, d / f'{stem}.{self.engine.ext}')
+            except TimeoutError as e:
+                out['error'] = str(e)
             except Exception as e:      # noqa: BLE001 —— 合成失败不阻断播报，浏览器仍可念文本
                 out['error'] = f'合成失败: {e}'
         if audio_path:
@@ -190,8 +206,9 @@ class TtsService:
 
 def build_tts(cfg, bus, media_dir: Path) -> TtsService:
     eng = (cfg.get('TTS_ENGINE') or 'edge').lower()
+    timeout = cfg.get_float('TTS_TIMEOUT')
     if eng == 'edge':
-        engine: TtsEngine = EdgeTtsEngine(cfg.get('TTS_VOICE'))
+        engine: TtsEngine = EdgeTtsEngine(cfg.get('TTS_VOICE'), timeout=timeout)
     elif eng == 'command':
         engine = CommandEngine(cfg.get('TTS_COMMAND'))
     else:
@@ -208,4 +225,4 @@ def build_tts(cfg, bus, media_dir: Path) -> TtsService:
             sinks.append(WebhookSink(cfg.get('TTS_WEBHOOK_URL')))
     if not sinks:
         sinks.append(BrowserSink(bus))
-    return TtsService(engine, sinks, media_dir)
+    return TtsService(engine, sinks, media_dir, timeout=timeout)

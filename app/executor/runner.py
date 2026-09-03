@@ -437,6 +437,19 @@ class RunManager:
         self.ctx = ctx
         self.lock = threading.Lock()
         self.active: MissionRunner | None = None
+        self._reconcile_stale_runs()
+
+    def _reconcile_stale_runs(self) -> None:
+        """进程重启后，库里仍是「进行中」的执行其实早已没人在推进：标记为中止，界面与定时器才不会被它卡住。"""
+        db = self.ctx.db
+        stale = [r['id'] for r in db.query("SELECT id FROM runs WHERE status IN ('pending','preflight','running','paused')")]
+        if not stale:
+            return
+        marks = ','.join('?' * len(stale))
+        db.execute(f"UPDATE runs SET status='aborted', ended_at=?, error='进程重启时执行仍在进行，已标记为中止' WHERE id IN ({marks})", [now_iso(), *stale])
+        db.execute(f"UPDATE run_legs SET status='aborted', ended_at=? WHERE run_id IN ({marks}) AND status IN "
+                   "('pending','planning','dispatched','navigating','arrived','inspecting')", [now_iso(), *stale])
+        self.ctx.log_event('runs_reconciled', f'启动时发现 {len(stale)} 个未结束的执行 {stale}，已标记为中止', level='warn', data={'run_ids': stale})
 
     def get_run(self, run_id: int) -> dict | None:
         r = self.ctx.db.query_one('SELECT * FROM runs WHERE id=?', (run_id,))

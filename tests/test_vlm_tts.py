@@ -35,3 +35,24 @@ def test_mock_vlm_alternates():
 def test_build_user_prompt_mentions_angles():
     s = build_user_prompt('门是否关好', 190, 230, forward_deg=180, waypoint_name='消防栓')
     assert '190°' in s and '230°' in s and '+10°' in s and '+50°' in s and '消防栓' in s
+
+
+def test_tts_hung_engine_times_out_but_browser_sink_still_gets_text(tmp_path):
+    import time
+    from app.bus import Bus
+    from app.tts.base import BrowserSink, TtsEngine, TtsService
+
+    class HangEngine(TtsEngine):
+        name, ext = 'hang', 'wav'
+
+        def synthesize(self, text, out_path):
+            time.sleep(4)
+            return None
+    bus = Bus()
+    q = bus.subscribe()
+    svc = TtsService(HangEngine(), [BrowserSink(bus)], tmp_path, timeout=0.5)
+    t0 = time.time()
+    r = svc.speak('卡住的合成')
+    assert time.time() - t0 < 3.0                                   # 不会等满 4 s
+    assert '超时' in r['error'] and r['audio_url'] is None
+    assert q.get_nowait()['payload']['text'] == '卡住的合成'          # 文本仍推给浏览器朗读

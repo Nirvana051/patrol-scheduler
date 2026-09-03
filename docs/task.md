@@ -260,6 +260,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 - 02:05 丢定位「暂停 → 重定位 → 继续」流程、HLS 抓帧备选、按航点统计。
 - 02:30 定时计划（schema v3）；02:55 人工改判（schema v4）、失败通知 webhook、CSV 导出；03:10 执行器复审；02:03 起通宵定时执行观察。
 - 02:20 VLM 评测脚本（人工复核当标注）、导出/导入、重建图重定向。
+- 04:47 通宵观察抓到 edge-tts 卡死执行的 bug（T21）→ 合成超时 + 启动对账残留执行。
 
 ---
 
@@ -288,6 +289,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
 
 ### 9.3 已解决（留档）
+T21 edge-tts 合成无超时，通宵观察中真的卡死了一条执行（04:43 起 `inspecting` 不动，定时计划被跳过）→ 合成放到工作线程并带 `TTS_TIMEOUT`（默认 20 s），超时记错误、执行继续；启动时把上次进程残留的「进行中」执行标记为中止（`runs_reconciled`）。
 T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停对方任务）；T16 systemd 单元（`deploy/`）；T17 时间戳带时区偏移；T19 幂等诚实失败（409 后查 `GET /task`，路径一致即按已下发）；T20 控制权 409 等待/重试次数可配（任务选项）；幂等键跨库撞键（加实例段）；测试残留执行线程污染共享 mock（`RunManager.shutdown`）；`pkill -f` 误杀自身 shell（pid 文件）；无头 Chrome 遇 SSE 不结束（`?nosse=1`）；`item_seq` 被对账写入覆盖（独立列 + schema v2）；mock `preempt seconds=0` 被当缺省；控制权测试在前置检查被拦（改为途中抢占）。
 
 ---
