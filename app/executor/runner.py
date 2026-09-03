@@ -187,10 +187,10 @@ class MissionRunner(threading.Thread):
                 nid, d = self.graph.nearest(float(tw['x']), float(tw['y']))
                 target = nid
                 self._log('plan_note', f"任务航点「{tw['name']}」没有导航航点，取最近的 {nid}（{d:.2f} m）", level='warn')
-            leg_id = db.execute('INSERT INTO run_legs(run_id,seq,task_waypoint_id,waypoint_name,to_node,status,attempt) '
-                                'VALUES(?,?,?,?,?,?,0)', (self.run_id, seq, tw['id'], tw['name'], target, 'pending'))
+            leg_id = db.execute('INSERT INTO run_legs(run_id,seq,task_waypoint_id,item_seq,waypoint_name,to_node,status,attempt) '
+                                'VALUES(?,?,?,?,?,?,?,0)', (self.run_id, seq, tw['id'], it['seq'], tw['name'], target, 'pending'))
             self.legs.append({'id': leg_id, 'seq': seq, 'task_waypoint_id': tw['id'], 'waypoint_name': tw['name'],
-                              'to_node': target, 'status': 'pending', 'attempt': 0, 'tw': tw, 'path': []})
+                              'to_node': target, 'status': 'pending', 'attempt': 0, 'tw': tw, 'path': [], 'item_seq': it['seq']})
         if self.opt.get('return_to_start') and self.cur_node and self.legs:
             seq += 1
             leg_id = db.execute('INSERT INTO run_legs(run_id,seq,waypoint_name,to_node,status,attempt) VALUES(?,?,?,?,?,0)',
@@ -383,25 +383,29 @@ class RunManager:
             r['summary'] = loads(r.get('summary'), {})
         return r
 
-    def start(self, task_id: int) -> dict:
+    def start(self, task_id: int, from_seq: int | None = None) -> dict:
+        """from_seq：从任务里第几个航点开始（跳过前面的），用于失败后重跑剩余航点。"""
         db = self.ctx.db
         task = db.query_one('SELECT * FROM tasks WHERE id=?', (task_id,))
         if not task:
             raise ValueError('任务不存在')
         items = db.query('SELECT ti.seq, tw.* FROM task_items ti JOIN task_waypoints tw ON tw.id=ti.task_waypoint_id '
                          'WHERE ti.task_id=? AND tw.enabled=1 ORDER BY ti.seq', (task_id,))
+        if from_seq:
+            items = [it for it in items if it['seq'] >= int(from_seq)]
         if not items:
-            raise ValueError('任务里没有启用的任务航点')
+            raise ValueError('任务里没有启用的任务航点' if not from_seq else f'第 {from_seq} 个航点之后没有可执行的任务航点')
         with self.lock:
             if self.active and self.active.is_alive():
                 raise RuntimeError(f'已有执行在进行（run #{self.active.run_id}）')
             options = {**loads(task.get('options'), {})}
+            name = task['name'] + (f'（从第 {from_seq} 个航点重跑）' if from_seq else '')
             run_id = db.execute('INSERT INTO runs(task_id,task_name,map_name,status,mode,total_legs) VALUES(?,?,?,?,?,?)',
-                                (task_id, task['name'], task['map_name'], 'pending', self.ctx.gateway.mode, len(items)))
+                                (task_id, name, task['map_name'], 'pending', self.ctx.gateway.mode, len(items)))
             runner = MissionRunner(self.ctx, run_id, task, [{'seq': it['seq'], 'tw': dict(it)} for it in items], options)
             self.active = runner
-        self.ctx.log_event('run_started', f"开始执行任务「{task['name']}」（{len(items)} 个任务航点，{self.ctx.gateway.mode} 模式）",
-                           run_id=run_id, data={'task_id': task_id, 'options': options})
+        self.ctx.log_event('run_started', f"开始执行任务「{name}」（{len(items)} 个任务航点，{self.ctx.gateway.mode} 模式）",
+                           run_id=run_id, data={'task_id': task_id, 'options': options, 'from_seq': from_seq})
         runner.start()
         return self.get_run(run_id)
 

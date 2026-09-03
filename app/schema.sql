@@ -1,4 +1,4 @@
--- 巡检调度系统 SQLite 模式 v1（见 docs/task.md §4）
+-- 巡检调度系统 SQLite 模式 v2（见 docs/task.md §4；增量迁移见 app/db.py）
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS run_legs (
   run_id           INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
   seq              INTEGER NOT NULL,
   task_waypoint_id INTEGER,
+  item_seq         INTEGER,                     -- 对应任务里第几个航点（重跑剩余航点用）
   waypoint_name    TEXT,
   from_node        TEXT,
   to_node          TEXT,

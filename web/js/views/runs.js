@@ -29,8 +29,16 @@ export async function render(root, { store, params }) {
     let r; try { r = await api(`/api/runs/${cur}`); } catch (e) { root.querySelector('#detail').innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
     const live = ['pending', 'preflight', 'running', 'paused'].includes(r.status);
     const done = r.legs.filter(l => l.status === 'done').length;
-    root.querySelector('#ctl').innerHTML = live ? `${r.status === 'paused' ? '<button class="btn btn-ok" data-a="resume">▶ 继续</button>' : '<button class="btn" data-a="pause">⏸ 暂停（当前段完成后）</button>'}<button class="btn btn-warn" data-a="skip">⏭ 跳过当前航点</button><button class="btn btn-danger" data-a="abort">■ 中止</button>` : '';
-    root.querySelector('#ctl').querySelectorAll('button').forEach(b => b.onclick = async () => { const a = b.dataset.a; if (a === 'abort' && !(await confirmDialog({ title: '中止执行', danger: true, okText: '中止', body: '会向云端发 DELETE /task 停下机器人，并把本次执行标记为已中止。' }))) return; try { await busy(b, () => api(`/api/runs/${cur}/${a}`, { method: 'POST' })); } catch (e) { toast(e.message, 'bad'); } });
+    const firstBad = r.legs.find(l => ['failed', 'aborted', 'pending'].includes(l.status) && l.task_waypoint_id);
+    const retrySeq = firstBad && firstBad.item_seq;
+    root.querySelector('#ctl').innerHTML = live ? `${r.status === 'paused' ? '<button class="btn btn-ok" data-a="resume">▶ 继续</button>' : '<button class="btn" data-a="pause">⏸ 暂停（当前段完成后）</button>'}<button class="btn btn-warn" data-a="skip">⏭ 跳过当前航点</button><button class="btn btn-danger" data-a="abort">■ 中止</button>`
+      : (retrySeq && !store.activeRun ? `<button class="btn btn-primary" data-a="retry" data-seq="${retrySeq}">↻ 从「${esc(firstBad.waypoint_name)}」重跑剩余航点</button>` : '');
+    root.querySelector('#ctl').querySelectorAll('button').forEach(b => b.onclick = async () => {
+      const a = b.dataset.a;
+      if (a === 'retry') { if (!(await confirmDialog({ title: '重跑剩余航点', okText: '开始', danger: store.isReal, body: `新建一次执行，从任务的第 ${b.dataset.seq} 个航点开始（前面已完成的不再走）。${store.isReal ? '<br><b>真机会动</b>，确认现场安全。' : ''}` }))) return; try { const nr = await busy(b, () => api(`/api/tasks/${r.task_id}/run?from_seq=${b.dataset.seq}`, { method: 'POST' })); toast(`已开始执行 #${nr.id}`, 'ok'); cur = nr.id; await loadList(); paint(); } catch (e) { toast(e.message, 'bad', 6000); } return; }
+      if (a === 'abort' && !(await confirmDialog({ title: '中止执行', danger: true, okText: '中止', body: '会向云端发 DELETE /task 停下机器人，并把本次执行标记为已中止。' }))) return;
+      try { await busy(b, () => api(`/api/runs/${cur}/${a}`, { method: 'POST' })); } catch (e) { toast(e.message, 'bad'); }
+    });
     const el = root.querySelector('#detail');
     const keepMap = mc && el.querySelector('canvas.map');
     el.innerHTML = `

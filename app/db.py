@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def now_iso() -> str:
@@ -88,13 +88,22 @@ class Database:
 
     # ── 迁移 ────────────────────────────────────────────────────────────────
     def migrate(self) -> None:
+        """空库：一次性建当前版本的全部表。旧库：按版本逐步 ALTER。"""
         c = self.conn()
         c.execute('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)')
         row = c.execute('SELECT MAX(version) AS v FROM schema_version').fetchone()
         v = row['v'] or 0
-        if v < 1:
+        if v == 0:
             c.executescript(SCHEMA.read_text(encoding='utf-8'))
-            c.execute('INSERT INTO schema_version(version) VALUES (1)')
+            c.execute('INSERT INTO schema_version(version) VALUES (?)', (SCHEMA_VERSION,))
+            return
+        if v < 2:
+            c.execute('ALTER TABLE run_legs ADD COLUMN item_seq INTEGER')
+            c.execute('INSERT INTO schema_version(version) VALUES (2)')
+
+    def version(self) -> int:
+        row = self.conn().execute('SELECT MAX(version) AS v FROM schema_version').fetchone()
+        return int(row['v'] or 0)
 
     # ── settings ────────────────────────────────────────────────────────────
     def get_setting(self, key: str) -> str | None:

@@ -102,3 +102,21 @@ def test_instance_id_persisted_and_unique(app_client, tmp_path):
         assert other.instance_id != iid           # 另一套 DB 另一个实例段：幂等键不会和这套撞
     finally:
         other.stop()
+
+
+def test_schema_migration_from_v1(tmp_path):
+    """旧库（v1，run_legs 没有 item_seq）打开时应被增量迁移到当前版本。"""
+    import sqlite3
+    from app.db import SCHEMA_VERSION, Database
+    p = tmp_path / 'old.db'
+    c = sqlite3.connect(p)
+    c.executescript('CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES (1);'
+                    'CREATE TABLE run_legs(id INTEGER PRIMARY KEY, run_id INTEGER, seq INTEGER, status TEXT);'
+                    'CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);')
+    c.commit(); c.close()
+    db = Database(p)
+    assert db.version() == SCHEMA_VERSION
+    cols = {r['name'] for r in db.query('PRAGMA table_info(run_legs)')}
+    assert 'item_seq' in cols
+    db2 = Database(tmp_path / 'fresh.db')
+    assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}

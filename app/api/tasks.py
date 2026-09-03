@@ -134,10 +134,10 @@ def plan(task_id: int, request: Request, from_node: str | None = None):
 
 
 @router.post('/{task_id}/run', status_code=202)
-def run_task(task_id: int, request: Request):
+def run_task(task_id: int, request: Request, from_seq: int | None = None):
     c = ctx_of(request)
     try:
-        return c.runs.start(task_id)
+        return c.runs.start(task_id, from_seq=from_seq)
     except ValueError as e:
         raise bad_request(str(e))
     except RuntimeError as e:

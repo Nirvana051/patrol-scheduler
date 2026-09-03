@@ -158,3 +158,18 @@ def test_manual_coordinate_waypoint_and_return_to_start_and_full_pano(app_client
     st = mock_robot.snapshot_state()
     assert abs(st['x']) < 0.2 and abs(st['y']) < 0.2                    # 回到起点
     assert any(e['type'] == 'plan_note' for e in run['events'])         # 记录了「取最近导航航点」
+
+
+def test_rerun_from_failed_item(app_client, mock_robot):
+    """第 1 段失败后，用 from_seq 从第 2 个航点重跑：新执行只走剩余航点。"""
+    init_robot(app_client, '1')
+    tid = make_task(app_client, nodes=('5', '20'))
+    mock_robot.inject_fault('obstacle')
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    assert run['status'] == 'failed' and run['legs'][0]['item_seq'] == 1
+    r = app_client.post(f'/api/tasks/{tid}/run?from_seq=2')
+    assert r.status_code == 202, r.text
+    run2 = wait_run(app_client, r.json()['id'])
+    assert run2['status'] == 'completed' and [l['to_node'] for l in run2['legs']] == ['20']
+    assert '重跑' in run2['task_name'] and len(run2['inspections']) == 1
+    assert app_client.post(f'/api/tasks/{tid}/run?from_seq=9').status_code == 400
