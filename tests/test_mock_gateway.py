@@ -69,7 +69,13 @@ def test_task_validation_and_status_words(mock_gw, mock_robot):
     r = requests.post(f'{R}/task', headers=H(mock_gw, **{'Idempotency-Key': 'k1'}), json={'map_name': DEMO_MAP, 'path': ['1', '2', '3']})
     assert r.status_code == 200
     t = requests.get(f'{R}/task', headers=H(mock_gw)).json()['data']
-    assert t['status'] == 'navigating' and t['active'] is True and t['visited'] == ['1'] and t['status_name'] == 'NAVIGATING'
+    assert t['status'] == 'nav_preprocess' and t['active'] is True and t['visited'] == ['1'] and t['status_name'] == 'NAV_PREPROCESS'
+    for _ in range(30):                                     # 预处理结束后才是 navigating（写 running 读不回 running）
+        t = requests.get(f'{R}/task', headers=H(mock_gw)).json()['data']
+        if t['status'] == 'navigating':
+            break
+        time.sleep(0.1)
+    assert t['status'] == 'navigating' and t['status_name'] == 'NAVIGATING'
     # 幂等重放
     r2 = requests.post(f'{R}/task', headers=H(mock_gw, **{'Idempotency-Key': 'k1'}), json={'map_name': DEMO_MAP, 'path': ['1', '2', '3']})
     assert r2.headers.get('Idempotent-Replay') == 'true' and r2.json() == r.json()

@@ -482,13 +482,14 @@ def main() -> None:
     ap.add_argument('--prestarted', action='store_true', default=os.environ.get('MOCK_PRESTARTED') == '1')
     ap.add_argument('--device-delay', type=float, default=float(os.environ.get('MOCK_DEVICE_DELAY', '3')))
     ap.add_argument('--localize-delay', type=float, default=float(os.environ.get('MOCK_LOCALIZE_DELAY', '1.5')))
+    ap.add_argument('--preprocess', type=float, default=float(os.environ.get('MOCK_PREPROCESS', '0.5')), help='导航预处理秒数（status 2）')
     ap.add_argument('--key', default=os.environ.get('MOCK_API_KEY', DEFAULT_KEY))
     ap.add_argument('--maps', default=os.environ.get('MOCK_MAPS', ''))
     args = ap.parse_args()
 
     robot = MockRobot(load_maps(args.maps or None), speed=args.speed, prelocalized=args.prelocalized,
                       prestarted=args.prestarted, device_delay=args.device_delay,
-                      localize_delay=args.localize_delay)
+                      localize_delay=args.localize_delay, preprocess_seconds=args.preprocess)
     app = create_app(robot, api_key=args.key)
     import uvicorn
     print(f'mock 网关: http://{args.host}:{args.port}  别名 {robot.alias}  ID {robot.robot_id}')

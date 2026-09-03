@@ -35,7 +35,7 @@ class MockGateway:
 
 @pytest.fixture(scope='session')
 def mock_gw():
-    robot = MockRobot(load_maps(), speed=10.0, device_delay=0.3, localize_delay=0.1)
+    robot = MockRobot(load_maps(), speed=10.0, device_delay=0.3, localize_delay=0.1, preprocess_seconds=0.3)
     port = free_port()
     server, th = serve_in_thread(create_mock(robot, rps=50.0), port=port)   # 限流放宽：测试里并发请求多
     gw = MockGateway(robot, port, server)

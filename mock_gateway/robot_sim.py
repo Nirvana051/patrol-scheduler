@@ -42,7 +42,7 @@ class MockRobot:
                  alias: str = 'ntu-dog-00001', rtsp_path: str = 'cam-1c697ada870c',
                  speed: float = 1.0, prelocalized: bool = False, prestarted: bool = False,
                  device_delay: float = 3.0, localize_delay: float = 1.5,
-                 start_node: str | None = None) -> None:
+                 start_node: str | None = None, preprocess_seconds: float = 0.5) -> None:
         self.maps = maps or load_maps()
         self.codes = load_status_codes()
         self.status_values = {v['code']: v for v in self.codes['status']['values']}
@@ -55,6 +55,8 @@ class MockRobot:
         self.speed = float(speed)
         self.device_delay = float(device_delay)
         self.localize_delay = float(localize_delay)
+        self.preprocess_seconds = float(preprocess_seconds)
+        self._preprocess_until = 0.0
 
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
@@ -222,7 +224,9 @@ class MockRobot:
                 # 真机：任务返回 200 但站着不动 —— 导航栈根本没起来
                 self.task['message'] = 'nav stack not running'
                 return {'accepted': True, 'map_name': map_name, 'path': list(path)}
-            self.task['status_code'] = self.write_aliases.get('running', 3)
+            # 真机：idle → nav_preprocess(2) → navigating(3)；写入 running 只是别名，读回来先是 nav_preprocess
+            self.task['status_code'] = 2 if self.preprocess_seconds > 0 else 3
+            self._preprocess_until = time.time() + self.preprocess_seconds
             self.task['visited'] = [path[0]]                     # 下发瞬间就包含起点
             self.task['current_index'] = 1
             self.task['current_target'] = path[1]
@@ -429,6 +433,11 @@ class MockRobot:
         self._was_avoiding = avoiding
 
         t = self.task
+        if t['status_code'] == 2:
+            if now >= self._preprocess_until:
+                t['status_code'] = 3
+            self.linear = 0.0
+            return
         if t['status_code'] != 3:
             self.linear = 0.0
             return

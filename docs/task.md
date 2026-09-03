@@ -93,7 +93,7 @@ certaintyX 云端网关  ──隧道──▶ 机器狗          ← 开发/测
 按宪法文档逐条仿真，用于无密钥开发与自动化测试：
 - 端点与响应形状与 `api-reference.md` 一致（信封、字段名、嵌套层数）；`/v1/status-codes` 回放 2026-09-03 从生产抓取的真实 JSON。
 - 行为复刻：状态词不对称（写 running 读 navigating，失败读 paused）；`Location` 恒为 1；未定位时 `/position` 503；透传传别名 → 502「机器人不在线」；缺 `active` 的急停体 = 取消急停；同键重放 + `Idempotent-Replay: true`；5 rps 限流 429 + `Retry-After`；未知 `task_id` → 400。
-- 机器人运动学仿真：沿 path 匀速运动（`MOCK_SPEED`，默认 1 m/s，可加速），`visited` 下发瞬间含起点，逐点产生 `waypoint_reached`（含 `index/total/nextTarget`），结束 `task_completed`；`events` 500 条环形缓冲 + `since` + `stream=1` SSE（心跳注释帧、`Last-Event-ID`）。
+- 机器人运动学仿真：下发后先 `nav_preprocess`（status 2，`MOCK_PREPROCESS` 秒）再 `navigating`，沿 path 匀速运动（`MOCK_SPEED`，默认 1 m/s，可加速），`visited` 下发瞬间含起点，逐点产生 `waypoint_reached`（含 `index/total/nextTarget`），结束 `task_completed`；`events` 500 条环形缓冲 + `since` + `stream=1` SSE（心跳注释帧、`Last-Event-ID`）。
 - 故障注入 `/mock/*`：下一段避障/规划失败（`task_failed` 0x234B/0x234C）、掉线、`ros_available=false`、现场抢控制权（`preempt`，复刻「人可抢程序、程序抢不了人」）、持续避障（停滞）、丢定位、丢事件（测对账）、传送、复位、调速。
 - 演示地图：`fixtures/map_demo.json`，~40 个航点的环路 + 支路，编号相邻的点相距 0.5–3 m（贴近真实 87 点地图的密度）。
 
