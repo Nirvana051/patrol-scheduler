@@ -136,3 +136,54 @@ def test_events_csv_export(app_client):
     assert r.status_code == 200 and r.headers['content-type'].startswith('text/csv')
     lines = r.text.lstrip('\ufeff').splitlines()
     assert lines[0].startswith('id,ts,source,type') and any('app_started' in l for l in lines[1:])
+
+
+def test_events_filters_and_pagination(app_client):
+    for i in range(5):
+        app_client.ctx.log_event('probe', f'探针 {i}', level='warn' if i % 2 else 'info')
+    d = app_client.get('/api/events?type=probe&limit=3').json()
+    assert len(d['items']) == 3 and d['items'][0]['message'] == '探针 4'          # 新的在前
+    older = app_client.get(f"/api/events?type=probe&before_id={d['items'][-1]['id']}&limit=10").json()['items']
+    assert [e['message'] for e in older] == ['探针 1', '探针 0']
+    assert all(e['level'] == 'warn' for e in app_client.get('/api/events?type=probe&level=warn').json()['items'])
+    assert len(app_client.get('/api/events?q=探针 3').json()['items']) == 1
+    assert 'probe' in d['types']
+
+
+def test_deleting_task_waypoint_removes_it_from_tasks(app_client):
+    sync_map(app_client)
+    a = app_client.post('/api/task-waypoints', json={'name': 'a', 'map_name': DEMO_MAP, 'nav_node_id': '2'}).json()['id']
+    b = app_client.post('/api/task-waypoints', json={'name': 'b', 'map_name': DEMO_MAP, 'nav_node_id': '3'}).json()['id']
+    tid = app_client.post('/api/tasks', json={'name': 't', 'map_name': DEMO_MAP, 'waypoint_ids': [a, b]}).json()['id']
+    r = app_client.delete(f'/api/task-waypoints/{a}').json()
+    assert r['removed_from_tasks'] == 1
+    items = app_client.get(f'/api/tasks/{tid}').json()['items']
+    assert [i['task_waypoint_id'] for i in items] == [b]
+
+
+def test_route_between_maps_and_unknown_nodes(app_client):
+    sync_map(app_client)
+    r = app_client.get(f'/api/maps/{DEMO_MAP}/route?from_node=1&to_node=999').json()
+    assert r['reachable'] is False and r['path'] is None
+    assert app_client.get('/api/maps/nope/route?from_node=1&to_node=2').status_code == 404
+
+
+def test_task_waypoint_reference_upload_and_thumbnail(app_client):
+    import io
+    from PIL import Image
+    sync_map(app_client)
+    tw = app_client.post('/api/task-waypoints', json={'name': 'u', 'map_name': DEMO_MAP, 'nav_node_id': '2'}).json()
+    buf = io.BytesIO()
+    Image.new('RGB', (640, 320), (10, 20, 30)).save(buf, 'PNG')
+    r = app_client.post(f"/api/task-waypoints/{tw['id']}/reference-image/upload", files={'file': ('p.png', buf.getvalue(), 'image/png')})
+    assert r.status_code == 200 and r.json()['width'] == 640
+    got = app_client.get(f"/api/task-waypoints/{tw['id']}").json()
+    assert got['reference_image_url'].endswith('.jpg') and app_client.get(got['reference_image_url']).status_code == 200
+    bad = app_client.post(f"/api/task-waypoints/{tw['id']}/reference-image/upload", files={'file': ('x.bin', b'not an image', 'application/octet-stream')})
+    assert bad.status_code == 400
+
+
+def test_run_control_on_finished_run_is_400(app_client):
+    assert app_client.post('/api/runs/9999/pause').status_code == 400
+    assert app_client.post('/api/runs/9999/nonsense').status_code == 400
+    assert app_client.get('/api/runs/9999').status_code == 404
