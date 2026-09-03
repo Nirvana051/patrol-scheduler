@@ -317,3 +317,20 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 14. 机器狗端播报：与 `robot-audio` ZMQ 服务对接 `play_tts`（T2）。
 15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；重建图后的任务航点迁移工具已有（导出/导入 + 按 x,y 重定向到新图最近航点），后续做 UI 引导与差异预览。
 16. 巡检模板库：常见点位（消防栓、通道、配电箱、指示牌）的 prompt/答案模版可复用。
+
+---
+
+## 11. 验收指引（明早照着做）
+
+```bash
+cd /home/leo/agent/scheduler
+make lint && make test                     # ruff 干净、80+ 用例全绿（约 2 分钟）
+./run.sh --mock                            # 起 mock 网关 + 调度系统，浏览器打开 http://127.0.0.1:8088
+make seed                                  # 另开终端：灌演示数据、初始化、跑一趟（约 30 s）
+```
+页面里看：总览（机器人/云端任务/初始化/最近检查/统计）→ 地图（航点 + 点云）→ 任务航点（编辑器拖角度线、试问 VLM、试听 TTS）→ 任务规划（执行 / 路线 / 定时）→ 执行监控（分段、检查、改判、重跑）→ 任务事件（筛选、导出）→ 设置（机头校准、系统自检、备份迁移）。
+故障演示：`curl -X POST 127.0.0.1:18443/mock/fault -H 'Content-Type: application/json' -d '{"kind":"obstacle"}'` 后再执行一次，看失败、重试与「从某航点重跑」。
+
+拿到真机密钥后：填 `config/.env` → `make smoke`（只读）→ 上游 `04_verify_flow.py` → 按 `docs/OPERATIONS.md` 初始化并跑单航点任务。
+
+当前开发实例（本机已在跑）：调度系统 http://127.0.0.1:8088（pid 见 `data/app.pid`），mock 网关 http://127.0.0.1:18443；02:03 起每 3 分钟自动执行一趟演示任务作稳定性观察，早上看「执行监控」与 `data/logs/app.log`。
