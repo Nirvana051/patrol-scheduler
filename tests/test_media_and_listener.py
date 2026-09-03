@@ -84,3 +84,29 @@ def test_listener_sse_receives_and_dedups(mock_gw, mock_robot, tmp_path):
     assert lst.received >= 1
     lst.stop()
     assert db.query_one("SELECT type FROM events WHERE source='cloud' ORDER BY id LIMIT 1")['type'] == 'obstacle'
+
+
+def test_listener_resets_cursor_when_gateway_restarted(mock_gw, mock_robot, tmp_path):
+    """网关重启 → seq 归零：游标应重置到服务端当前 seq，并记一条系统事件，而不是静默漏事件。"""
+    from app.bus import Bus
+    from app.config import Config
+    from app.db import Database
+    from app.robot.client import RobotGateway
+    from app.robot.events import CloudEventListener
+    db = Database(tmp_path / 'ev3.db')
+    g = RobotGateway(mock_gw.url, mock_gw.alias, mock_gw.key, rps=20)
+    lst = CloudEventListener(g, db, Bus(), Config(env_file=tmp_path / 'no.env'))
+    lst.cursor = 5000                                        # 旧游标远大于服务端 seq（模拟网关重启过）
+    lst.start()
+    t0 = time.time()
+    while not lst.connected and time.time() - t0 < 10:
+        time.sleep(0.05)
+    assert lst.connected and lst.cursor < 5000
+    mock_robot.set_estop(True)
+    t0 = time.time()
+    types = []
+    while 'emergency' not in types and time.time() - t0 < 5:
+        time.sleep(0.05)
+        types = [r['type'] for r in db.query("SELECT type FROM events ORDER BY id")]
+    lst.stop()
+    assert 'event_cursor_reset' in types and 'emergency' in types, types

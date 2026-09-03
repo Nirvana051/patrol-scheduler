@@ -395,6 +395,8 @@ class MockRobot:
             self.drop_events = False
             self.lease = None
             self.linear = 0.0
+            self._was_avoiding = False          # 否则复位后第一拍会补发一条「避障结束」
+            self._loc_lost = False
 
     def snapshot_state(self) -> dict:
         with self.lock:

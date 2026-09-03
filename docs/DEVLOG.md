@@ -144,3 +144,6 @@
 
 ## 03:05–03:20 mock 更像真机一点
 - 仿真机器人下发后先进入 `nav_preprocess`（status 2）再 `navigating`（可配 `MOCK_PREPROCESS`），验证执行器对中间 active 状态的处理（对账看 `active`，不看具体状态词）；契约测试相应改为「读回先是 nav_preprocess，随后 navigating」。
+
+## 03:20–03:35 网关重启的游标回退
+- 云端事件只在网关内存里，网关重启后 seq 归零；我们若继续带旧游标 `since=300` 订阅，服务端只会给 seq>300 的事件——中间几百条会静默丢掉。监听线程每次（重）连接前先读服务端当前 seq，比游标小就重置并记 `event_cursor_reset` 系统事件。

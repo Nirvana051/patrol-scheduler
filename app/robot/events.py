@@ -97,9 +97,6 @@ class CloudEventListener(threading.Thread):
     def run(self) -> None:
         while not self._stop.is_set():
             try:
-                if self.cursor is None:
-                    # 不带 since 只给当下 seq —— 这是游标起点（不倒带历史）
-                    self.cursor = int(self.gateway.events().get('seq') or 0)
                 if self._sse_failures >= 3:
                     self.transport = 'poll'
                     self._poll_for(60.0)
@@ -118,8 +115,22 @@ class CloudEventListener(threading.Thread):
                 self._sse_failures += 1
                 self._stop.wait(2.0)
 
+    def _sync_cursor_with_server(self) -> None:
+        """服务端 seq 比我们的游标小 → 网关重启过（seq 归零），继续用旧游标会静默漏事件；重置到服务端当前 seq。"""
+        server_seq = int(self.gateway.events().get('seq') or 0)
+        if self.cursor is None or server_seq < self.cursor:
+            old = self.cursor
+            self.cursor = server_seq
+            if old is not None:
+                self.db.add_event('system', 'event_cursor_reset', level='warn',
+                                  message=f'云端事件序号回退（{old} → {server_seq}），网关可能重启过；游标已重置，中间的事件无法补回',
+                                  data={'old': old, 'server_seq': server_seq})
+                self.bus.publish('event', {'source': 'system', 'type': 'event_cursor_reset', 'level': 'warn',
+                                           'message': f'云端事件序号回退（{old} → {server_seq}），游标已重置', 'data': {}})
+
     def _stream_sse(self) -> None:
         g = self.gateway
+        self._sync_cursor_with_server()
         url = f'{g.host}/v1/robots/{urllib.parse.quote(g.robot)}/events?since={self.cursor}&stream=1'
         req = urllib.request.Request(url, headers={'X-API-Key': g.raw.api_key, 'Accept': 'text/event-stream'})
         g.limiter.acquire()
@@ -158,6 +169,7 @@ class CloudEventListener(threading.Thread):
 
     def _poll_for(self, seconds: float) -> None:
         t0 = time.time()
+        self._sync_cursor_with_server()
         while not self._stop.is_set() and time.time() - t0 < seconds:
             batch = self.gateway.events(since=self.cursor)
             self.connected = True
