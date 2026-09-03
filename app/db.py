@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def now_iso() -> str:
@@ -111,6 +111,9 @@ class Database:
             for col in ('human_passed INTEGER', 'human_note TEXT', 'human_at TEXT'):
                 c.execute(f'ALTER TABLE inspections ADD COLUMN {col}')
             c.execute('INSERT INTO schema_version(version) VALUES (4)')
+        if v < 5:
+            c.execute('ALTER TABLE inspections ADD COLUMN capture_pose TEXT')
+            c.execute('INSERT INTO schema_version(version) VALUES (5)')
 
     def version(self) -> int:
         row = self.conn().execute('SELECT MAX(version) AS v FROM schema_version').fetchone()

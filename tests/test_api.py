@@ -121,7 +121,8 @@ def test_schema_migration_from_v1(tmp_path):
     cols = {r['name'] for r in db.query('PRAGMA table_info(run_legs)')}
     assert 'item_seq' in cols
     assert db.query_one("SELECT name FROM sqlite_master WHERE type='table' AND name='schedules'")
-    assert 'human_passed' in {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
+    cols_i = {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
+    assert 'human_passed' in cols_i and 'capture_pose' in cols_i
     db2 = Database(tmp_path / 'fresh.db')
     assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}
 

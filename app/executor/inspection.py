@@ -43,13 +43,15 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
     row = {'run_id': run_id, 'leg_id': leg.get('id'), 'task_waypoint_id': tw.get('id'), 'waypoint_name': name,
            'prompt': tw.get('prompt') or '', 'angle_from': af, 'angle_to': at, 'image_path': None, 'crop_path': None,
            'vlm_provider': ctx.vlm.describe(), 'vlm_raw': '', 'answer': 'error', 'expected': (template or {}).get('expected', 'yes'),
-           'passed': None, 'tts_text': None, 'tts_audio_path': None, 'tts_status': None, 'latency_ms': 0}
+           'passed': None, 'tts_text': None, 'tts_audio_path': None, 'tts_status': None, 'latency_ms': 0, 'capture_pose': None}
     run_dir = ctx.media_dir / 'runs' / str(run_id)
     stem = f"leg{int(leg.get('seq', 0)):02d}_tw{tw.get('id')}_{time.strftime('%H%M%S')}"
 
-    # 1. 抓图
+    # 1. 抓图（顺手记下此刻位姿：机头 yaw 对校准角度范围有用）
     try:
-        ctx.log_event('snapshot', f'{name}：抓取全景', run_id=run_id, leg_id=leg.get('id'))
+        pose = ctx.status.get().get('position') if ctx.status else None
+        row['capture_pose'] = dumps(pose) if pose else None
+        ctx.log_event('snapshot', f'{name}：抓取全景', run_id=run_id, leg_id=leg.get('id'), data={'pose': pose})
         data = ctx.snapshot.grab({'waypoint': tw, 'run_id': run_id})
         p_full = save_jpeg(data, run_dir, f'{stem}_pano')
         row['image_path'] = str(p_full.relative_to(ctx.media_dir))
@@ -117,7 +119,7 @@ def _finish(ctx, row: dict, template: dict | None, name: str, t0: float) -> dict
     row['created_at'] = now_iso()
     cols = ['run_id', 'leg_id', 'task_waypoint_id', 'waypoint_name', 'prompt', 'angle_from', 'angle_to', 'image_path',
             'crop_path', 'vlm_provider', 'vlm_raw', 'answer', 'expected', 'passed', 'tts_text', 'tts_audio_path',
-            'tts_status', 'latency_ms', 'created_at']
+            'tts_status', 'latency_ms', 'capture_pose', 'created_at']
     row['id'] = ctx.db.execute(f"INSERT INTO inspections({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
                                [row.get(c) for c in cols])
     ctx.bus.publish('inspection', row)

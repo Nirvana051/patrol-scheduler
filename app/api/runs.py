@@ -19,6 +19,7 @@ def _insp(r: dict, media='/media') -> dict:
         r['annot_url'] = f"{media}/{r['image_path'].replace('_pano.jpg', '_annot.jpg')}"
     r['tts_status'] = loads(r.get('tts_status'), r.get('tts_status'))
     r['effective_passed'] = r['human_passed'] if r.get('human_passed') is not None else r.get('passed')
+    r['capture_pose'] = loads(r.get('capture_pose'), None)
     return r
 
 

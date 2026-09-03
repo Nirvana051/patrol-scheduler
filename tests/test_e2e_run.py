@@ -59,6 +59,7 @@ def test_full_mission_completes_with_inspections(app_client, mock_robot):
     assert [i['passed'] for i in insp] == [1, 0, 1]
     assert insp[0]['tts_text'] == '点5正常' and insp[1]['tts_text'] == '点20异常'
     for i in insp:
+        assert i['capture_pose'] and 'yaw' in i['capture_pose']            # 抓图时位姿已记录
         assert app_client.get(i['image_url']).status_code == 200
         assert app_client.get(i['crop_url']).status_code == 200
         assert app_client.get(i['annot_url']).status_code == 200
