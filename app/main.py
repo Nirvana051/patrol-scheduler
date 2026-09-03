@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import events, maps, robot, runs, schedules, settings, stats, stream, task_waypoints, tasks
+from app.api import backup, events, maps, robot, runs, schedules, settings, stats, stream, task_waypoints, tasks
 from app.config import Config
 from app.context import AppContext
 from app.db import Database
@@ -70,7 +70,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
         return JSONResponse({'detail': str(exc)}, status_code=400)
 
     for r in (robot.router, maps.router, task_waypoints.router, tasks.router, runs.router, events.router,
-              stream.router, settings.router, stats.router, schedules.router):
+              stream.router, settings.router, stats.router, schedules.router, backup.router):
         app.include_router(r)
 
     started_at = time.time()
