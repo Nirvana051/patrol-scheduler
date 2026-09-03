@@ -107,3 +107,7 @@
 - `NOTIFY_WEBHOOK_URL`：检查不通过 / 执行失败或中止时后台 POST JSON（用例：假 webhook 服务收到 inspection_failed 与 run_failed）。
 - 事件导出 CSV（全部或按执行），带 BOM 方便 Excel 打开。
 - 迁移测试的合成 v1 库缺 inspections 表导致 v4 ALTER 失败 → 夹具补齐。
+
+## 02:55–03:10 执行器复审
+- 通读 runner.py：新一次尝试时清掉段上一次的错误文字；检查流水线自身的未预期异常改为记录 `inspection_error` 后继续（机器人此刻静止在航点上，不值得为软件 bug 触发急停——急停仍保留给导航阶段的未预期异常，C15）。
+- 通宵稳定性观察开始（02:03）：每 3 分钟定时执行演示任务，早上统一看执行/内存/日志。

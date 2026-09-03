@@ -217,7 +217,7 @@ class MissionRunner(threading.Thread):
         while True:
             attempt += 1
             self.skip_req.clear()
-            self._set_leg(leg, status='planning', attempt=attempt, from_node=self.cur_node)
+            self._set_leg(leg, status='planning', attempt=attempt, from_node=self.cur_node, error=None)
             if self.cur_node == target:
                 self._log('leg_no_nav', f"第 {leg['seq']} 段：已在航点 {target}，无需导航", leg_id=leg['id'])
                 self._set_leg(leg, status='arrived', path=dumps([target]), arrived_at=now_iso())
@@ -266,7 +266,11 @@ class MissionRunner(threading.Thread):
                     if settle > 0:
                         time.sleep(settle)
                     self._set_leg(leg, status='inspecting')
-                    run_inspection(self.ctx, self.run_id, leg, leg['tw'])
+                    try:
+                        run_inspection(self.ctx, self.run_id, leg, leg['tw'])
+                    except Exception as e:      # noqa: BLE001 —— 机器人此刻静止在航点上，检查出错不值得急停
+                        self._log('inspection_error', f"第 {leg['seq']} 段检查流水线异常：{e}", level='error', leg_id=leg['id'],
+                                  data={'traceback': traceback.format_exc(limit=5)})
                 self._set_leg(leg, status='done', ended_at=now_iso())
                 return
             if outcome == 'lost_localization':
