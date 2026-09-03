@@ -176,7 +176,7 @@ for 每个任务航点 T（按 seq）:
 | **地图与导航航点** | 2D 俯视画布：航点 + 邻接边 + 机器人实时位置 + 点云背景（下采样） | 选地图、同步航点（API 读取）、悬停看 id/坐标、点击「添加为任务航点」、上传点云 |
 | **任务航点** | 单表 CRUD | 编辑器：名称 / 导航航点（自动带出 x,y,z,yaw）/ 手工坐标 / prompt / 全景角度编辑器（两条可拖拽竖线 + 刻度 + 范围显示）/ 答案模版 / 参考图（抓一张 / 上传）/ 试问 VLM / 试听 TTS |
 | **任务规划** | 任务 CRUD；有序航点列表（拖拽排序）；执行选项 | 从任务航点表或地图加入；路线预览（各段路径、总长）；「执行」 |
-| **执行监控** | 当前/历史执行；段进度时间线；小地图轨迹；每个检查的全景/裁切/答案/TTS | 暂停 / 跳过 / 中止；回放 TTS |
+| **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS | 暂停 / 跳过 / 中止；回放 TTS；失败或中止后「从某航点重跑剩余航点」 |
 | **任务事件** | 云端 + 系统事件统一时间线，可按类型/执行过滤，实时追加 | since 游标翻页 |
 | **设置** | 连接（host/别名/密钥掩码）、VLM（provider/base_url/model/key）、TTS（引擎/声音/汇出）、抓图源、机头校准（FORWARD_DEG）、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
 
@@ -184,31 +184,38 @@ for 每个任务航点 T（按 seq）:
 
 ---
 
-## 7. 对外接口（本系统 `/api`）
+## 7. 对外接口（本系统 `/api`，运行时 `/api/docs` 有自动文档）
 
 ```
 GET  /api/health
-GET  /api/robot/status                      聚合快照（在线/租约/急停/ROS/定位年龄/位姿/任务语义字段）
-POST /api/robot/init/device-start|device-stop|localize   透传三步（C8）
+GET  /api/robot/status                      聚合快照（在线/租约/急停/ROS/定位年龄/位姿/任务语义字段/事件监听状态/进行中执行）
+POST /api/robot/status/refresh              立即刷新一次
+GET  /api/robot/preflight                   执行前置检查（可达/在线/急停/ROS/定位/云端空闲/控制权）
+POST /api/robot/init/device-start|device-stop {wait}   透传 ②/⑧；GET /api/robot/init/device-status?task_id&starting 轮询
+POST /api/robot/init/localize {map_name,node_id[,pose]}   透传 ④（C8）
 POST /api/robot/estop {active}              (C11)
-DELETE /api/robot/task
+DELETE /api/robot/task                      停止云端任务（不停设备，C14）
 POST /api/robot/snapshot                    立即抓一张全景 → /media/…
-GET  /api/robot/video                       {hls, rtsp}
+GET  /api/robot/video                       {hls, rtsp, rtsp_path}
+GET  /api/robot/status-codes                云端权威状态码表（缓存 10 分钟，C7）
 GET  /api/maps                              云端地图列表 + 本地同步状态
 POST /api/maps/{name}/sync                  拉取航点进 nav_waypoints
-GET  /api/maps/{name}/waypoints             缓存（含 yaw）
-GET  /api/maps/{name}/route?from=&to=       BFS 预览
-POST /api/maps/{name}/pointcloud            上传 pcd/ply；GET …?voxel=0.2 下采样点
-GET/POST /api/task-waypoints ; GET/PUT/DELETE /api/task-waypoints/{id}
-POST /api/task-waypoints/{id}/reference-image   {source: capture|upload}
-POST /api/task-waypoints/{id}/test-vlm      用参考图或现抓图试问
+GET  /api/maps/{name}/waypoints             缓存（含 yaw、边、包围盒、连通块数）
+GET  /api/maps/{name}/route?from_node=&to_node=   最短路预览
+POST /api/maps/{name}/pointcloud            上传 pcd/ply；GET …?voxel=&max_points= 体素下采样
+GET/POST /api/task-waypoints[?map_name=] ; GET/PUT/DELETE /api/task-waypoints/{id}
+POST /api/task-waypoints/{id}/reference-image          现抓一张作参考图；…/reference-image/upload 上传
+POST /api/task-waypoints/{id}/test-vlm {use,prompt,angle_from,angle_to}   试问 VLM，返回裁切图与将播报的句子
 POST /api/tts/test {text}
-GET/POST /api/tasks ; GET/PUT/DELETE /api/tasks/{id} ; GET /api/tasks/{id}/plan ; POST /api/tasks/{id}/run
-GET  /api/runs ; GET /api/runs/{id} ; POST /api/runs/{id}/pause|resume|skip|abort
-GET  /api/runs/{id}/inspections ; GET /api/inspections/{id}
-GET  /api/events?since=&type=&run_id=&limit=
-GET  /api/stream                            SSE → 浏览器
-GET/PUT /api/settings
+GET/POST /api/tasks ; GET/PUT/DELETE /api/tasks/{id} ; GET /api/tasks/{id}/plan[?from_node=]
+POST /api/tasks/{id}/run[?from_seq=N]       执行（from_seq：从第 N 个航点重跑剩余）
+GET  /api/runs ; GET /api/runs/active ; GET /api/runs/{id}（含 legs/inspections/events）
+POST /api/runs/{id}/pause|resume|skip|abort
+GET  /api/runs/{id}/inspections ; GET /api/inspections[?limit=] ; GET /api/inspections/{id}
+GET  /api/events?before_id=&after_id=&source=&type=&run_id=&level=&q=&limit=
+GET  /api/stream                            SSE → 浏览器（hello/robot_status/event/run/leg/inspection/tts）
+GET/PUT /api/settings                       密钥掩码；改 CX_* 自动重建连接
+POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜门开/关
 ```
 
 ---
