@@ -115,11 +115,11 @@ run_legs(id, run_id FK, seq, task_waypoint_id, from_node, to_node, path JSON, id
          status, attempt, dispatched_at, arrived_at, ended_at, cloud_task JSON, error)
 inspections(id, run_id, leg_id, task_waypoint_id, waypoint_name, prompt, angle_from, angle_to,
             image_path, crop_path, vlm_provider, vlm_raw, answer, expected, passed,
-            tts_text, tts_audio_path, tts_status, latency_ms, created_at)
+            tts_text, tts_audio_path, tts_status, latency_ms, human_passed, human_note, human_at (v4), created_at)
 events(id, ts, source cloud|system, type, cloud_seq UNIQUE, run_id, leg_id, level, message, data JSON)
 schedules(id, task_id FK, kind daily|interval, spec, enabled, last_run_at, last_result, next_run_at, created_at, updated_at)  — v3
 ```
-schema 版本 v3：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁移（`app/db.py`）。
+schema 版本 v4：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁移（`app/db.py`）。
 
 `answer_template` 示例：
 ```json
@@ -180,9 +180,9 @@ for 每个任务航点 T（按 seq）:
 | **地图与导航航点** | 2D 俯视画布：航点 + 邻接边 + 机器人实时位置 + 点云背景（下采样） | 选地图、同步航点（API 读取）、悬停看 id/坐标、点击「添加为任务航点」、上传点云 |
 | **任务航点** | 单表 CRUD | 编辑器：名称 / 导航航点（自动带出 x,y,z,yaw）/ 手工坐标 / prompt / 全景角度编辑器（两条可拖拽竖线 + 刻度 + 范围显示）/ 答案模版 / 参考图（抓一张 / 上传）/ 试问 VLM / 试听 TTS |
 | **任务规划** | 任务 CRUD；有序航点列表；执行选项（速度/步态/避障/稳定/各类超时/重试/丢定位策略/返回起点）；定时计划 | 从任务航点表或地图加入、就地新建任务航点；路线预览（各段路径、总长）；「执行」；「⏰ 定时」（每天固定时刻 / 每 N 分钟，立即触发） |
-| **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS | 暂停 / 跳过 / 中止；回放 TTS；失败或中止后「从某航点重跑剩余航点」 |
-| **任务事件** | 云端 + 系统事件统一时间线，可按类型/执行过滤，实时追加 | since 游标翻页 |
-| **设置** | 连接（host/别名/密钥掩码）、VLM（provider/base_url/model/key）、TTS（引擎/声音/汇出）、抓图源、机头校准（FORWARD_DEG）、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
+| **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS；本次执行的云端 + 系统事件 | 暂停 / 跳过 / 中止；回放 TTS；人工改判；失败或中止后「从某航点重跑剩余航点」；导出本次事件 CSV |
+| **任务事件** | 云端 + 系统事件统一时间线，可按来源/类型/级别/执行/关键字过滤，实时追加 | 翻页加载更早；导出 CSV |
+| **设置** | 连接（host/别名/密钥掩码）、VLM（provider/base_url/model/key）、TTS（引擎/声音/汇出）、抓图源、执行默认值、通知 webhook、定时器间隔、机头校准（FORWARD_DEG）、系统自检、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
 
 设计语言：浅色专业控制台风格，系统字体 + Noto Sans CJK；状态色 绿/黄/红 只用于状态；所有让机器人动的操作在 REAL 模式二次确认；深色模式跟随系统。
 
@@ -216,7 +216,8 @@ POST /api/tasks/{id}/run[?from_seq=N]       执行（from_seq：从第 N 个航�
 GET  /api/runs ; GET /api/runs/active ; GET /api/runs/{id}（含 legs/inspections/events）
 POST /api/runs/{id}/pause|resume|skip|abort
 GET  /api/runs/{id}/inspections ; GET /api/inspections[?limit=] ; GET /api/inspections/{id}
-GET  /api/events?before_id=&after_id=&source=&type=&run_id=&level=&q=&limit=
+PUT  /api/inspections/{id}/verdict {passed|null, note}   人工改判（统计按改判后算，VLM 原结论保留）
+GET  /api/events?before_id=&after_id=&source=&type=&run_id=&level=&q=&limit= ; GET /api/events/export.csv[?run_id=]
 GET  /api/stream                            SSE → 浏览器（hello/robot_status/event/run/leg/inspection/tts）
 GET/PUT /api/settings                       密钥掩码；改 CX_* 自动重建连接
 GET  /api/stats?days=30                     按任务航点的检查次数/通过率/平均耗时、执行状态统计、最近失败
@@ -301,13 +302,13 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 **R3 判读质量（并行）**
 7. 真 VLM 评测集：每个任务航点收集若干参考图 + 人工标注「是/不是」，脚本批量跑 `test-vlm` 出准确率/误报率；据此调 prompt 与裁切范围、是否附整图。
 8. 等距投影 → 透视重投影（py360convert）再给模型；对比评测。
-9. 结果统计与人工改判：按航点通过率、误报回看、改判入库作为评测样本。
+9. 结果统计与人工改判已有第一版（按航点通过率、改判入库）；后续：改判样本导出为评测集、误报回看视图。
 
 **R4 平台化（1–2 月）**
 10. 多机器人（robots 表、每机器人一组监听/轮询/执行线程、页面切换）。
 11. 定时任务已做简版（每天固定时刻 / 每 N 分钟，冲突时跳过）；后续：任务队列、cron 表达式、失败自动重试策略（避障失败换路线）。
 12. 权限与审计（登录、角色、操作日志）；局域网部署（反向代理 + TLS）。
-13. 通知：检查不通过推送 IM/Webhook；日报。
+13. 通知：Webhook 已有（检查不通过 / 执行失败中止）；后续：IM 适配（企微/飞书/Slack 模板）、日报。
 
 **R5 与现场系统打通**
 14. 机器狗端播报：与 `robot-audio` ZMQ 服务对接 `play_tts`（T2）。
