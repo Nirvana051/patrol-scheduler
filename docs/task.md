@@ -25,7 +25,7 @@
 | 编号 | 约束 | 出处 | 在本系统中的落实 |
 |------|------|------|-----------------|
 | C1 | 日常读写只走 `/v1/robots/{别名}/…`（冻结契约，认别名）；透传通道 `/api/robots/{机器人ID}/api/…` **只认机器人 ID**，传别名得到误导性的 502 | README §2.2 | 复用 SDK `certaintyx.py`（原样拷贝），透传由 `RobotClient._passthrough` 自动用缓存的 `robotId` |
-| C2 | 写操作需要控制权；用 `auto` 模式密钥，停止写入 30s 后自然释放；现场人可抢走控制权（409），程序抢不回来 | README §2.3 | 不做后台续期；409 视为正常，UI 提示「现场有人操作」，执行器退避重试有限次后暂停 |
+| C2 | 写操作需要控制权；用 `auto` 模式密钥，停止写入 30s 后自然释放；现场人可抢走控制权（409），程序抢不回来 | README §2.3 | 不做后台续期；409 视为正常，UI 提示「现场有人操作」；执行器按任务选项等待 `lease_retry_seconds` 重试 `lease_retries` 次，仍不行判段失败；前置检查发现控制权被人持有时直接拒绝执行 |
 | C3 | 写操作必须带 `Idempotency-Key`，**重试时复用同一个键**；有意的重新下发（新一次尝试）才换新键；键在 10 分钟内**全局**不能重复，否则云端只回放不执行 | README §2.4 | 分段任务键 `ps-{instance}-r{run}-l{leg}-a{attempt}`（`instance` 为每个 DB 生成一次的随机段，避免换库/多套部署撞键 —— mock 测试实际抓到过这个 bug）；同一 attempt 内 SDK 自动复用 |
 | C4 | 限流 5 rps，429 按 `Retry-After` 退避；轮询间隔不小于 1s；要到达通知用事件流，不轮询 | README §2.5 | 全局令牌桶限速（4 rps）；状态轮询 ≥2s；到达用 SSE `events?stream=1`，`since` 游标续接 |
 | C5 | 状态词写读不对称：写 `running` 读回 `navigating`，失败读回 `paused`；判断用响应里的 `active`/`terminal` 布尔或 SDK 的集合 | api-reference「任务状态词」 | 执行器只用 `terminal`/`active`/`status_code`，永不 `== 'running'` |
@@ -147,13 +147,15 @@ schema 版本 v5：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁
 for 每个任务航点 T（按 seq）:
    [规划]   route = BFS(cur → T.nav_node)（neighbors 图）；cur==目标 → 无需导航
    [下发]   cursor = events().seq            ← 必须在下发前（C10）
-            POST /task {map_name, path=route}  Idempotency-Key=ps-r{run}-l{seq}-a{attempt}（C3）
+            先订阅事件队列，再取游标，再 POST /task {map_name, path=route}  Idempotency-Key=ps-{instance}-r{run}-l{seq}-a{attempt}（C3，每次下发换新键）
    [等待]   消费 cloud_seq>cursor 的事件：
               waypoint_reached → 记录进度；waypoint==终点且 nextTarget 空 → 到达
               task_completed   → 到达
-              task_failed      → 段失败（errorHex），stop_task，按 max_retries 重试（新 attempt 新键）或标记失败并暂停执行
-              task_stopped     → 外部停止 → 执行标记 aborted
-              obstacle / localization / emergency → 记录（丢定位可配置为暂停）
+              task_failed      → 段失败（errorHex + 云端 error_name），stop_task，按 max_retries 重试（新键）或执行 failed
+              task_stopped     → 外部停止 → 执行 aborted
+              task_started(path ≠ 本段) → 现场下发了别的任务 → 执行 aborted，且不去停对方的任务
+              localization(valid=false) → 按 lost_localization_action：pause（默认：停任务、段回 pending、暂停等人工重定位后继续）/ continue / fail
+              obstacle / emergency → 记录
             每 5s GET /task 对账（C10 兜底）：terminal && status_code==4 → 到达；255 → 失败（原因附云端 error_name/error_text）；
             not_started_timeout 内仍 idle/无进展 → 「任务未执行」（多半是没初始化，C8）；
             云端不可达/掉线超过 offline_timeout → 段失败；active 但超过 stall_timeout 没有新到达 → 「停滞」；leg_timeout 兜底
@@ -172,11 +174,11 @@ for 每个任务航点 T（按 seq）:
 
 ## 6. 网页（本地托管，`http://127.0.0.1:8088`）
 
-左侧导航 + 顶栏（模式徽标、机器人在线/控制权/急停/定位四个状态灯、急停大按钮）。视图：
+左侧导航 + 顶栏（模式徽标、在线/控制权/急停/定位/云端任务五个状态灯、位姿、声音开关、停任务、急停大按钮）。视图：
 
 | 视图 | 内容 | 关键交互 |
 |------|------|---------|
-| **总览** | 机器人卡片（位置、定位年龄、急停、ROS、租约）、当前执行、最近检查结果、HLS 实况 | 初始化三步按钮（启动设备 / 定位 / 停设备）、停止任务、急停/取消 |
+| **总览** | 机器人卡片（位置、定位年龄、急停、ROS、租约、事件流状态）、云端任务语义字段、当前执行 / 下次定时执行、最近检查、近 30 天按航点统计、HLS 实况（mock 下为合成图） | 初始化三步按钮（启动设备 / 定位 / 停设备）、刷新（前置检查）、抓一张全景、停止任务、急停/取消 |
 | **地图与导航航点** | 2D 俯视画布：航点 + 邻接边 + 机器人实时位置 + 点云背景（下采样） | 选地图、同步航点（API 读取）、悬停看 id/坐标、点击「添加为任务航点」、上传点云 |
 | **任务航点** | 单表 CRUD | 编辑器：名称 / 导航航点（自动带出 x,y,z,yaw）/ 手工坐标 / prompt / 全景角度编辑器（两条可拖拽竖线 + 刻度 + 范围显示）/ 答案模版 / 参考图（抓一张 / 上传）/ 试问 VLM / 试听 TTS |
 | **任务规划** | 任务 CRUD；有序航点列表；执行选项（速度/步态/避障/稳定/各类超时/重试/丢定位策略/返回起点）；定时计划 | 从任务航点表或地图加入、就地新建任务航点；路线预览（各段路径、总长）；「执行」；「⏰ 定时」（每天固定时刻 / 每 N 分钟，立即触发） |
