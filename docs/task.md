@@ -117,7 +117,9 @@ inspections(id, run_id, leg_id, task_waypoint_id, waypoint_name, prompt, angle_f
             image_path, crop_path, vlm_provider, vlm_raw, answer, expected, passed,
             tts_text, tts_audio_path, tts_status, latency_ms, created_at)
 events(id, ts, source cloud|system, type, cloud_seq UNIQUE, run_id, leg_id, level, message, data JSON)
+schedules(id, task_id FK, kind daily|interval, spec, enabled, last_run_at, last_result, next_run_at, created_at, updated_at)  — v3
 ```
+schema 版本 v3：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁移（`app/db.py`）。
 
 `answer_template` 示例：
 ```json
@@ -177,7 +179,7 @@ for 每个任务航点 T（按 seq）:
 | **总览** | 机器人卡片（位置、定位年龄、急停、ROS、租约）、当前执行、最近检查结果、HLS 实况 | 初始化三步按钮（启动设备 / 定位 / 停设备）、停止任务、急停/取消 |
 | **地图与导航航点** | 2D 俯视画布：航点 + 邻接边 + 机器人实时位置 + 点云背景（下采样） | 选地图、同步航点（API 读取）、悬停看 id/坐标、点击「添加为任务航点」、上传点云 |
 | **任务航点** | 单表 CRUD | 编辑器：名称 / 导航航点（自动带出 x,y,z,yaw）/ 手工坐标 / prompt / 全景角度编辑器（两条可拖拽竖线 + 刻度 + 范围显示）/ 答案模版 / 参考图（抓一张 / 上传）/ 试问 VLM / 试听 TTS |
-| **任务规划** | 任务 CRUD；有序航点列表（拖拽排序）；执行选项 | 从任务航点表或地图加入；路线预览（各段路径、总长）；「执行」 |
+| **任务规划** | 任务 CRUD；有序航点列表；执行选项（速度/步态/避障/稳定/各类超时/重试/丢定位策略/返回起点）；定时计划 | 从任务航点表或地图加入、就地新建任务航点；路线预览（各段路径、总长）；「执行」；「⏰ 定时」（每天固定时刻 / 每 N 分钟，立即触发） |
 | **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS | 暂停 / 跳过 / 中止；回放 TTS；失败或中止后「从某航点重跑剩余航点」 |
 | **任务事件** | 云端 + 系统事件统一时间线，可按类型/执行过滤，实时追加 | since 游标翻页 |
 | **设置** | 连接（host/别名/密钥掩码）、VLM（provider/base_url/model/key）、TTS（引擎/声音/汇出）、抓图源、机头校准（FORWARD_DEG）、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
@@ -217,6 +219,9 @@ GET  /api/runs/{id}/inspections ; GET /api/inspections[?limit=] ; GET /api/inspe
 GET  /api/events?before_id=&after_id=&source=&type=&run_id=&level=&q=&limit=
 GET  /api/stream                            SSE → 浏览器（hello/robot_status/event/run/leg/inspection/tts）
 GET/PUT /api/settings                       密钥掩码；改 CX_* 自动重建连接
+GET  /api/stats?days=30                     按任务航点的检查次数/通过率/平均耗时、执行状态统计、最近失败
+GET/POST /api/schedules ; PUT/DELETE /api/schedules/{id} ; POST /api/schedules/{id}/fire   定时计划
+GET  /api/health                            系统自检（版本/实例/DB 版本/线程/事件监听/媒体占用）
 POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜门开/关
 ```
 
@@ -247,6 +252,8 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 - 01:30 执行详情缺云端事件 → 云端事件挂到进行中的执行/段；段失败原因附云端错误名。
 - 01:33 ruff 接入、`requirements.lock`、截图集。
 - 01:43 外部任务识别、幂等诚实失败、控制权重试可配、时间戳带时区、systemd 单元。
+- 02:05 丢定位「暂停 → 重定位 → 继续」流程、HLS 抓帧备选、按航点统计。
+- 02:30 定时计划（schema v3）。
 
 ---
 
@@ -257,10 +264,10 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 |---|------|------|-----------|
 | T1 | **本机没有真机 API 密钥**，全部验证在 mock 上完成 | mock 与真实网关的差异（响应字段细节、时序、任务下发后的状态推进、HLS/RTSP 可用性）只能靠真机暴露 | 拿到 `CX_KEY` 后按 `docs/OPERATIONS.md`：`scripts/real_smoke.py`（只读）→ 上游 `04_verify_flow.py` → 单点任务 → 全流程；差异回填到 mock |
 | T3 | 全景图中「机头正前方」对应的列未知 | 角度范围 ↔ 实际方位 | 已做「设置 → 机头校准」工具；真机首帧校准一次 |
-| T6 | RTSP 抓一帧的耗时与成功率未知（ffmpeg TCP 连接可能 2–10 s） | 检查时长、settle 时间 | 记录 `snapshot` 事件耗时；若不稳定，`SNAPSHOT_SOURCE` 增加 `hls`（取最新分片解一帧）备选 |
+| T6 | RTSP 抓一帧的耗时与成功率未知（ffmpeg TCP 连接可能 2–10 s） | 检查时长、settle 时间 | 记录 `snapshot` 事件耗时；已加 `SNAPSHOT_SOURCE=hls` 备选（8554 被挡时用） |
 | T7 | `waypoint_reached` 产生时机身可能仍在减速/转向 | 抓图模糊、角度偏 | `SETTLE_SECONDS`（默认 2 s）按实测调；必要时到点后再读一次 `/position` 的 yaw 修正角度零点 |
 | T8 | 分段下发间隙：每段结束 → 检查（3–15 s）→ 下一段起步，真机 `nav_preprocess` 耗时未知 | `not_started_timeout`（25 s）是否够 | 实测后调；执行记录里每段有下发/到达时刻可回看 |
-| T9 | 巡检途中丢定位目前只记录（可配置为段失败） | 需人工介入 | 做「在最近航点重新定位后继续」的引导流程（roadmap R2） |
+| T9 | 巡检途中丢定位 | 需人工重新定位 | 已做：默认策略「停下并暂停」，提示用当前最近航点重新定位后点继续，恢复后从当前位置重规划该段；真机验证提示时机与恢复流程 |
 
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
@@ -287,7 +294,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 3. 把 mock 与真机的差异逐条回填到 `mock_gateway`，保持测试可信。
 
 **R2 可靠性（2–3 周）**
-4. 丢定位半自动恢复：暂停 → 引导用最近航点重定位 → 继续（T9）。
+4. 丢定位恢复流程已有（暂停 → 重定位 → 继续），真机上验证提示与恢复时机（T9）。
 5. 外部任务识别（T13）、控制权退避策略（T20）、幂等诚实失败处理（T19）。
 6. 守护与运维：systemd 单元、自动清理 cron、日志轮转已就位；健康检查接入监控。
 
@@ -298,7 +305,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 
 **R4 平台化（1–2 月）**
 10. 多机器人（robots 表、每机器人一组监听/轮询/执行线程、页面切换）。
-11. 定时任务与队列（cron 表达式、冲突检测、失败自动重试策略：避障失败换路线）。
+11. 定时任务已做简版（每天固定时刻 / 每 N 分钟，冲突时跳过）；后续：任务队列、cron 表达式、失败自动重试策略（避障失败换路线）。
 12. 权限与审计（登录、角色、操作日志）；局域网部署（反向代理 + TLS）。
 13. 通知：检查不通过推送 IM/Webhook；日报。
 
