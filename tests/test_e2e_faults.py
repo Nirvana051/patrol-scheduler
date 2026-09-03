@@ -111,3 +111,20 @@ def test_lost_localization_logged_but_continues(app_client, mock_robot):
         assert any(e['type'] == 'lost_localization' for e in run['events'])
     finally:
         mock_robot.speed = 10.0
+
+
+def test_stall_detection_when_robot_keeps_avoiding(app_client, mock_robot):
+    """任务 active 但一直避障不前进 → 超过 stall_timeout 判段失败，而不是等满 leg_timeout。"""
+    init_robot(app_client, '1')
+    mock_robot.speed = 2.0
+    try:
+        tid = make_task(app_client, nodes=('20',), stall_timeout=4, leg_timeout=120)
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        mock_robot.obstacle(60)                                   # 持续避障，不再产生到达
+        run = wait_run(app_client, run_id, timeout=40)
+        assert run['status'] == 'failed' and '停滞' in run['error'], run['error']
+        assert any(e['type'] == 'obstacle' for e in app_client.get('/api/events?source=cloud').json()['items'])
+    finally:
+        mock_robot.avoiding_until = 0
+        mock_robot.speed = 10.0

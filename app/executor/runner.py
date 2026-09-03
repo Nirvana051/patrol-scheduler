@@ -15,7 +15,7 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'max_retries': 1,
+DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False}
 
@@ -43,6 +43,7 @@ class MissionRunner(threading.Thread):
         self.graph = None
         self.status = 'pending'
         self.legs: list[dict] = []
+        self.current_leg_id: int | None = None
 
     # ── 对外控制 ─────────────────────────────────────────────────────────────
     def pause(self) -> None:
@@ -111,6 +112,7 @@ class MissionRunner(threading.Thread):
                 if self.abort_req.is_set():
                     raise RunAbort('人工中止')
                 self._set_run(current_leg=leg['seq'])
+                self.current_leg_id = leg['id']
                 self._execute_leg(leg)
             self._finish('completed', None)
         except RunAbort as e:
@@ -264,11 +266,19 @@ class MissionRunner(threading.Thread):
                 self._set_leg(leg, status='aborted', ended_at=now_iso(), error=outcome)
                 raise RunAbort('人工中止' if outcome == 'aborted' else '云端任务被外部停止（现场有人接管？）')
             # failed:* / timeout / not_started
+            if outcome.startswith('failed:0x'):
+                try:
+                    st = self.ctx.gateway.task()
+                    if st.get('error_hex') == outcome[7:] and st.get('error_name'):
+                        outcome = f"{outcome} {st.get('error_name')}（{st.get('error_text')}）"
+                except RobotError:
+                    pass
             self._safe_stop_task()
             self._relocate_current_node()
             reason = {'timeout': f"超过 {self.opt.get('leg_timeout')} s 未到达",
                       'not_started': '任务下发成功但机器人没有动（设备未启动 / 未定位？见 full-patrol.md ②④）',
-                      'failed:offline': f"机器人掉线 / 云端不可达超过 {self.opt.get('offline_timeout')} s"}.get(outcome, outcome)
+                      'failed:offline': f"机器人掉线 / 云端不可达超过 {self.opt.get('offline_timeout')} s",
+                      'failed:stall': f"停滞：超过 {self.opt.get('stall_timeout')} s 没有到达新的航点（持续避障 / 卡住？）"}.get(outcome, outcome)
             if attempt <= max_retries and outcome != 'not_started':
                 self._log('leg_retry', f"第 {leg['seq']} 段失败（{reason}），重试 {attempt}/{max_retries}", level='warn', leg_id=leg['id'])
                 continue
@@ -301,6 +311,8 @@ class MissionRunner(threading.Thread):
         not_started_timeout = float(self.opt.get('not_started_timeout') or 25)
         offline_timeout = float(self.opt.get('offline_timeout') or 90)
         offline_since: float | None = None
+        stall_timeout = float(self.opt.get('stall_timeout') or 180)
+        last_progress = t0
         try:
             while True:
                 if self.abort_req.is_set():
@@ -315,6 +327,7 @@ class MissionRunner(threading.Thread):
                     t, d = ev.get('type'), ev.get('data') or {}
                     if t == 'waypoint_reached':
                         progress = True
+                        last_progress = now_ev = time.time()
                         prog = {'last_reached': d.get('waypoint'), 'index': d.get('index'), 'total': d.get('total'), 'next': d.get('nextTarget')}
                         if leg['status'] != 'navigating':
                             self._set_leg(leg, status='navigating', cloud_task=dumps(prog))
@@ -365,6 +378,8 @@ class MissionRunner(threading.Thread):
                                 return 'not_started'
                 if now - t0 > leg_timeout:
                     return 'timeout'
+                if progress and now - last_progress > stall_timeout:
+                    return 'failed:stall'
         finally:
             pass
 
@@ -429,6 +444,13 @@ class RunManager:
         if r and r.is_alive():
             r.abort()
             r.join(timeout)
+
+    def current_ref(self) -> tuple[int, int | None] | None:
+        with self.lock:
+            r = self.active
+        if not r or not r.is_alive():
+            return None
+        return r.run_id, r.current_leg_id
 
     def active_info(self) -> dict | None:
         with self.lock:

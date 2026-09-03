@@ -60,9 +60,10 @@ def level_of(ev: dict) -> str:
 
 
 class CloudEventListener(threading.Thread):
-    def __init__(self, gateway, db, bus, cfg) -> None:
+    def __init__(self, gateway, db, bus, cfg, run_ref=None) -> None:
         super().__init__(name='cloud-events', daemon=True)
         self.gateway, self.db, self.bus, self.cfg = gateway, db, bus, cfg
+        self.run_ref = run_ref            # callable → (run_id, leg_id) | None：把云端事件挂到正在跑的执行上
         self.cursor: int | None = None
         self.connected = False
         self.transport = 'sse'
@@ -178,10 +179,18 @@ class CloudEventListener(threading.Thread):
         ts = None
         if ts_ms:
             ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(ts_ms / 1000)) + f'.{int(ts_ms % 1000):03d}'
+        run_id = leg_id = None
+        if self.run_ref is not None:
+            try:
+                ref = self.run_ref()
+                if ref:
+                    run_id, leg_id = ref
+            except Exception:      # noqa: BLE001
+                pass
         row_id = self.db.add_event('cloud', ev.get('type', '?'), cloud_seq=seq, data=ev.get('data') or {},
-                                   message=describe(ev), level=level_of(ev), ts=ts)
+                                   message=describe(ev), level=level_of(ev), ts=ts, run_id=run_id, leg_id=leg_id)
         row = {'id': row_id, 'ts': ts, 'source': 'cloud', 'type': ev.get('type'), 'cloud_seq': seq,
-               'level': level_of(ev), 'message': describe(ev), 'data': ev.get('data') or {}}
+               'level': level_of(ev), 'message': describe(ev), 'data': ev.get('data') or {}, 'run_id': run_id, 'leg_id': leg_id}
         self.bus.publish('event', row)
         with self._lock:
             subs = list(self._subs)

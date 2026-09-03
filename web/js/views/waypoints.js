@@ -7,7 +7,7 @@ export async function render(root, { store, params }) {
   root.innerHTML = `
   <div class="page-head"><h1>任务航点</h1><div class="actions"><select id="f-map" style="width:260px"><option value="">全部地图</option></select><button class="btn btn-primary" id="b-new">＋ 新建任务航点</button></div></div>
   <div class="help" style="margin-bottom:10px">任务航点 = 导航航点（或手工坐标）+ 检查 prompt + 全景角度范围 + 答案模版。单表存储，可在多个任务里复用。</div>
-  <div class="table-wrap"><table><thead><tr><th>#</th><th>名称</th><th>地图</th><th>导航航点</th><th>x / y / yaw</th><th>角度范围</th><th>prompt</th><th>期望</th><th>启用</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  <div class="table-wrap"><table><thead><tr><th>#</th><th>参考图</th><th>名称</th><th>地图</th><th>导航航点</th><th>x / y / yaw</th><th>角度范围</th><th>prompt</th><th>期望</th><th>启用</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
   try { const s = await api('/api/settings'); forwardDeg = Number(s.settings.FORWARD_DEG) || 180; } catch { /* ignore */ }
   const sel = root.querySelector('#f-map');
   try { const { maps } = await api('/api/maps'); sel.innerHTML += maps.map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join(''); } catch { /* ignore */ }
@@ -16,11 +16,11 @@ export async function render(root, { store, params }) {
     const { items } = await api('/api/task-waypoints' + q);
     const tb = root.querySelector('#rows');
     tb.innerHTML = items.length ? items.map(t => `<tr data-id="${t.id}">
-      <td class="muted">${t.id}</td><td><b>${esc(t.name)}</b></td><td class="mono small">${esc(t.map_name)}</td><td>${t.nav_node_id ? badge(`航点 ${t.nav_node_id}`, 'info') : badge('手工坐标')}</td>
+      <td class="muted">${t.id}</td><td>${t.reference_image_url ? `<img src="${t.reference_image_url}" style="width:96px;height:48px;object-fit:cover;border-radius:4px;display:block">` : '<span class="muted small">—</span>'}</td><td><b>${esc(t.name)}</b></td><td class="mono small">${esc(t.map_name)}</td><td>${t.nav_node_id ? badge(`航点 ${t.nav_node_id}`, 'info') : badge('手工坐标')}</td>
       <td class="mono small">${fmt.num(t.x)} / ${fmt.num(t.y)} / ${fmt.deg(t.yaw)}</td><td class="mono">${t.angle_from}° → ${t.angle_to}°</td>
       <td class="small" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(t.prompt)}">${esc(t.prompt) || '<span class="muted">（无）</span>'}</td>
       <td>${esc(ANSWER_TEXT[t.answer_template?.expected] || t.answer_template?.expected || '是')}</td><td>${t.enabled ? '✅' : '—'}</td>
-      <td class="right" style="white-space:nowrap"><button class="btn btn-xs" data-a="edit">编辑</button> <button class="btn btn-xs btn-danger" data-a="del">删除</button></td></tr>`).join('') : '<tr><td colspan="10" class="empty">还没有任务航点。去「地图」页点一个导航航点 → 添加为任务航点，或点右上角新建。</td></tr>';
+      <td class="right" style="white-space:nowrap"><button class="btn btn-xs" data-a="edit">编辑</button> <button class="btn btn-xs btn-danger" data-a="del">删除</button></td></tr>`).join('') : '<tr><td colspan="11" class="empty">还没有任务航点。去「地图」页点一个导航航点 → 添加为任务航点，或点右上角新建。</td></tr>';
     tb.querySelectorAll('tr[data-id]').forEach(tr => {
       const id = Number(tr.dataset.id), t = items.find(x => x.id === id);
       tr.querySelector('[data-a=edit]').onclick = () => openWaypointEditor(t, load);

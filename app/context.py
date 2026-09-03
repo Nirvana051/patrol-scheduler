@@ -56,7 +56,8 @@ class AppContext:
         self.gateway = RobotGateway(cfg.get('CX_HOST'), cfg.get('CX_ROBOT'), cfg.get('CX_KEY'),
                                     rps=cfg.get_float('RATE_LIMIT_RPS'))
         self.status = StatusPoller(self.gateway, self.db, self.bus, cfg)
-        self.events = CloudEventListener(self.gateway, self.db, self.bus, cfg)
+        self.events = CloudEventListener(self.gateway, self.db, self.bus, cfg,
+                                         run_ref=lambda: self.runs.current_ref() if getattr(self, 'runs', None) else None)
 
     def reload_adapters(self) -> None:
         cfg = self.cfg

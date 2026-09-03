@@ -89,8 +89,11 @@ def test_task_failed_event_marks_run_failed(app_client, mock_robot):
     tid = make_task(app_client, nodes=('5', '20'))
     mock_robot.inject_fault('obstacle')
     run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
-    assert run['status'] == 'failed' and '0x234B' in run['error']
+    assert run['status'] == 'failed' and '0x234B' in run['error'] and 'OBSTACLE_FAILURE' in run['error']
     assert run['legs'][0]['status'] == 'failed' and run['legs'][1]['status'] == 'aborted'
+    cloud_types = [e['type'] for e in run['events'] if e['source'] == 'cloud']
+    assert 'task_failed' in cloud_types and 'waypoint_reached' in cloud_types      # 云端事件挂到了本次执行上
+    assert all(e['leg_id'] == run['legs'][0]['id'] for e in run['events'] if e['source'] == 'cloud' and e['type'] == 'task_failed')
     assert run['inspections'] == []
     assert app_client.get('/api/robot/status').json()['task']['terminal'] is True
 
