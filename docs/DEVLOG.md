@@ -147,3 +147,4 @@
 
 ## 03:20–03:35 网关重启的游标回退
 - 云端事件只在网关内存里，网关重启后 seq 归零；我们若继续带旧游标 `since=300` 订阅，服务端只会给 seq>300 的事件——中间几百条会静默丢掉。监听线程每次（重）连接前先读服务端当前 seq，比游标小就重置并记 `event_cursor_reset` 系统事件。
+- 又一次被 `pkill -f` 杀掉自己的 shell：模式 `[m]ock_gateway.server` 本身没问题，但同一条命令里还写了启动命令 `-m mock_gateway.server`，于是模式匹配到了自己的命令行。教训：kill 与 start 不要放在同一条命令里 → 写成 `scripts/dev_restart.sh`（模式用字符串拼接生成）。
