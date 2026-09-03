@@ -1,0 +1,13 @@
+# 凭据：绝不提交
+config/.env
+.env
+*.key
+
+# 运行产物
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.log
+shots/

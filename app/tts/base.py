@@ -1,0 +1,211 @@
+# -*- coding: utf-8 -*-
+"""TTS：引擎（文本→音频文件）与汇出（把播报送到某个「扬声器」）解耦。
+
+云端 API 没有扬声器端点（docs/TODO T2），所以汇出做成插件：
+* browser  —— 经 SSE 推给网页，由浏览器播放音频（无音频文件时用浏览器自带 speechSynthesis 念文本）
+* local    —— 本机扬声器（ffplay）
+* zmq      —— 用户已有的 robot-audio ZMQ 服务（tts_cmq_dev/robot-audio），需要机器人端补一个 play_tts 动作
+* webhook  —— POST JSON 到任意地址
+"""
+from __future__ import annotations
+
+import asyncio
+import shlex
+import shutil
+import subprocess
+import threading
+import time
+from pathlib import Path
+
+
+class TtsEngine:
+    name = 'base'
+    ext = 'mp3'
+
+    def synthesize(self, text: str, out_path: Path) -> Path | None:
+        raise NotImplementedError
+
+
+class NullEngine(TtsEngine):
+    """不生成音频，只把文本交给汇出（浏览器会用 speechSynthesis 念）。"""
+    name = 'none'
+
+    def synthesize(self, text, out_path):
+        return None
+
+
+class EdgeTtsEngine(TtsEngine):
+    name = 'edge'
+
+    def __init__(self, voice: str = 'zh-CN-XiaoxiaoNeural') -> None:
+        self.voice = voice
+
+    def synthesize(self, text, out_path):
+        import edge_tts
+
+        async def go():
+            await edge_tts.Communicate(text, self.voice).save(str(out_path))
+        asyncio.run(go())
+        return out_path if out_path.exists() and out_path.stat().st_size > 0 else None
+
+
+class CommandEngine(TtsEngine):
+    """任意命令行 TTS：模板里用 {text} 与 {out}，例如 `espeak-ng -v cmn -w {out} {text}` 或 piper。"""
+    name = 'command'
+    ext = 'wav'
+
+    def __init__(self, template: str) -> None:
+        self.template = template
+
+    def synthesize(self, text, out_path):
+        if not self.template:
+            raise RuntimeError('TTS_COMMAND 为空')
+        cmd = [part.replace('{text}', text).replace('{out}', str(out_path)) for part in shlex.split(self.template)]
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.decode('utf-8', 'replace')[:300])
+        return out_path if out_path.exists() else None
+
+
+class AudioSink:
+    name = 'base'
+
+    def play(self, text: str, audio_path: Path | None, audio_url: str | None, meta: dict) -> str:
+        raise NotImplementedError
+
+
+class BrowserSink(AudioSink):
+    name = 'browser'
+
+    def __init__(self, bus) -> None:
+        self.bus = bus
+
+    def play(self, text, audio_path, audio_url, meta):
+        self.bus.publish('tts', {'text': text, 'audio_url': audio_url, 'meta': meta, 'ts': time.time()})
+        return 'ok' if self.bus.subscriber_count else 'ok（当前没有打开的页面）'
+
+
+class LocalSpeakerSink(AudioSink):
+    name = 'local'
+
+    def play(self, text, audio_path, audio_url, meta):
+        if audio_path is None:
+            return 'skip（无音频文件）'
+        player = shutil.which('ffplay')
+        if player:
+            cmd = [player, '-nodisp', '-autoexit', '-loglevel', 'error', str(audio_path)]
+        elif shutil.which('paplay') and audio_path.suffix == '.wav':
+            cmd = ['paplay', str(audio_path)]
+        else:
+            return 'error: 找不到 ffplay/paplay'
+        threading.Thread(target=lambda: subprocess.run(cmd, capture_output=True, timeout=120), daemon=True).start()
+        return 'ok'
+
+
+class ZmqRobotAudioSink(AudioSink):
+    """对接 tts_cmq_dev/robot-audio 的 ZMQ REQ/REP 协议：{"action": ..., "params": {...}}。
+
+    现有服务只有 prepare_audio / play_audio(task,id) / ping；这里发 play_tts（文本）——机器人端需补这一动作
+    （见 docs/TODO.md T2）。pyzmq 未安装时如实报告。
+    """
+    name = 'zmq'
+
+    def __init__(self, endpoint: str, timeout_ms: int = 3000) -> None:
+        self.endpoint = endpoint
+        self.timeout_ms = timeout_ms
+
+    def play(self, text, audio_path, audio_url, meta):
+        try:
+            import zmq
+        except ImportError:
+            return 'unavailable: 未安装 pyzmq'
+        ctx = zmq.Context.instance()
+        s = ctx.socket(zmq.REQ)
+        s.setsockopt(zmq.LINGER, 0)
+        s.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+        s.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+        try:
+            s.connect(self.endpoint)
+            s.send_json({'action': 'play_tts', 'params': {'text': text, 'wait': False, 'meta': meta}})
+            rep = s.recv_json()
+            return 'ok' if rep.get('status') == 'ok' else f"error: {rep.get('error')}"
+        except Exception as e:      # noqa: BLE001
+            return f'error: {e}'
+        finally:
+            s.close()
+
+
+class WebhookSink(AudioSink):
+    name = 'webhook'
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    def play(self, text, audio_path, audio_url, meta):
+        import requests
+        try:
+            r = requests.post(self.url, json={'text': text, 'audio_url': audio_url, 'meta': meta}, timeout=5)
+            return 'ok' if r.ok else f'error: HTTP {r.status_code}'
+        except requests.RequestException as e:
+            return f'error: {e}'
+
+
+class TtsService:
+    def __init__(self, engine: TtsEngine, sinks: list[AudioSink], media_dir: Path, url_prefix: str = '/media') -> None:
+        self.engine = engine
+        self.sinks = sinks
+        self.media_dir = Path(media_dir)
+        self.url_prefix = url_prefix
+        self.lock = threading.Lock()
+
+    def describe(self) -> dict:
+        return {'engine': self.engine.name, 'sinks': [s.name for s in self.sinks]}
+
+    def speak(self, text: str, meta: dict | None = None) -> dict:
+        meta = meta or {}
+        text = (text or '').strip()
+        out = {'text': text, 'engine': self.engine.name, 'audio_path': None, 'audio_url': None, 'sinks': {}, 'error': None}
+        if not text:
+            out['error'] = '空文本'
+            return out
+        audio_path = None
+        if not isinstance(self.engine, NullEngine):
+            d = self.media_dir / 'tts'
+            d.mkdir(parents=True, exist_ok=True)
+            stem = f"tts_{time.strftime('%Y%m%d_%H%M%S')}_{int((time.time() % 1) * 1000):03d}"
+            try:
+                audio_path = self.engine.synthesize(text, d / f'{stem}.{self.engine.ext}')
+            except Exception as e:      # noqa: BLE001 —— 合成失败不阻断播报，浏览器仍可念文本
+                out['error'] = f'合成失败: {e}'
+        if audio_path:
+            out['audio_path'] = str(audio_path.relative_to(self.media_dir))
+            out['audio_url'] = f"{self.url_prefix}/{out['audio_path']}"
+        for s in self.sinks:
+            try:
+                out['sinks'][s.name] = s.play(text, audio_path, out['audio_url'], meta)
+            except Exception as e:      # noqa: BLE001
+                out['sinks'][s.name] = f'error: {e}'
+        return out
+
+
+def build_tts(cfg, bus, media_dir: Path) -> TtsService:
+    eng = (cfg.get('TTS_ENGINE') or 'edge').lower()
+    if eng == 'edge':
+        engine: TtsEngine = EdgeTtsEngine(cfg.get('TTS_VOICE'))
+    elif eng == 'command':
+        engine = CommandEngine(cfg.get('TTS_COMMAND'))
+    else:
+        engine = NullEngine()
+    sinks: list[AudioSink] = []
+    for name in [s.strip() for s in (cfg.get('TTS_SINKS') or 'browser').split(',') if s.strip()]:
+        if name == 'browser':
+            sinks.append(BrowserSink(bus))
+        elif name == 'local':
+            sinks.append(LocalSpeakerSink())
+        elif name == 'zmq':
+            sinks.append(ZmqRobotAudioSink(cfg.get('TTS_ZMQ_ENDPOINT')))
+        elif name == 'webhook' and cfg.get('TTS_WEBHOOK_URL'):
+            sinks.append(WebhookSink(cfg.get('TTS_WEBHOOK_URL')))
+    if not sinks:
+        sinks.append(BrowserSink(bus))
+    return TtsService(engine, sinks, media_dir)

@@ -1,0 +1,80 @@
+{
+    "success": true,
+    "data": {
+        "version": "v1",
+        "robotAddress": "/v1/robots/{alias|robotId}",
+        "auth": "X-API-Key: cx_... \u6216 Authorization: Bearer cx_...",
+        "endpoints": [
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/telemetry",
+                "desc": "\u7535\u6c60\u3001\u72b6\u6001\u7801\u7b49\u9065\u6d4b\u5feb\u7167"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/position",
+                "desc": "\u5f53\u524d\u4f4d\u59ff"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/perception",
+                "desc": "\u5b9a\u4f4d\u662f\u5426\u65b0\u9c9c\u3001\u6709\u65e0\u969c\u788d"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/maps",
+                "desc": "\u5730\u56fe\u5217\u8868"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/maps/{name}/waypoints",
+                "desc": "\u67d0\u5730\u56fe\u7684\u822a\u70b9\u62d3\u6251"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/task",
+                "desc": "\u5f53\u524d\u4efb\u52a1\u4e0e\u5df2\u8bbf\u822a\u70b9"
+            },
+            {
+                "method": "POST",
+                "path": "/v1/robots/{robot}/task",
+                "desc": "\u4e0b\u53d1\u5de1\u68c0\u4efb\u52a1\uff08\u9700\u63a7\u5236\u6743\uff09"
+            },
+            {
+                "method": "DELETE",
+                "path": "/v1/robots/{robot}/task",
+                "desc": "\u505c\u6b62\u4efb\u52a1\uff08\u9700\u63a7\u5236\u6743\uff09"
+            },
+            {
+                "method": "POST",
+                "path": "/v1/robots/{robot}/estop",
+                "desc": "\u6025\u505c\uff08\u514d\u63a7\u5236\u6743\uff09"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots",
+                "desc": "\u673a\u5668\u4eba\u5217\u8868\uff08\u542b\u5728\u7ebf\u72b6\u6001\u4e0e API \u57fa\u5740\uff09"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}",
+                "desc": "\u5355\u53f0\u6982\u89c8"
+            },
+            {
+                "method": "POST",
+                "path": "/v1/robots/{robot}/control/acquire|renew|release",
+                "desc": "\u63a7\u5236\u6743"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/status-codes",
+                "desc": "\u72b6\u6001\u7801/\u9519\u8bef\u7801\u6743\u5a01\u8868\uff08\u514d\u9274\u6743\uff09"
+            },
+            {
+                "method": "GET",
+                "path": "/v1/robots/{robot}/events?since=N[&stream=1]",
+                "desc": "\u4e8b\u4ef6\u6d41\uff1a\u5230\u8fbe\u822a\u70b9/\u4efb\u52a1\u5b8c\u6210/\u5931\u8d25/\u907f\u969c/\u4e22\u5b9a\u4f4d\uff08SSE \u6216\u7acb\u5373\u8fd4\u56de\uff09"
+            }
+        ]
+    }
+}

@@ -1,0 +1,6 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+edge-tts>=6.1
+anthropic>=1.0
+# 以下来自系统 site-packages（venv 用 --system-site-packages）：numpy, Pillow, opencv-python, pytest, requests
