@@ -31,6 +31,10 @@ cp config/env.example config/.env          # 填真机凭据；不填默认连�
 真机：`config/.env` 里把 `CX_HOST/CX_ROBOT/CX_KEY` 换成真值，`SNAPSHOT_SOURCE=rtsp`，先 `.venv/bin/python scripts/real_smoke.py`（只读冒烟），再 `./run.sh`。详见 `docs/OPERATIONS.md`。
 页面顶栏会显示 **REAL**，所有让机器人动的按钮都会二次确认。先在「总览」做 ② 启动设备 → ④ 定位，再执行任务。
 
+## 常用命令（Makefile）
+
+`make run` / `make mock` / `make test` / `make lint` / `make shots` / `make seed` / `make smoke` / `make clean-media` / `make lock`
+
 ## 测试
 
 ```bash
