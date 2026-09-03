@@ -416,10 +416,7 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
         b = await body_json(request)
         owner = b.get('owner') or 'admin'
         secs = float(b['seconds']) if 'seconds' in b else 60.0
-        with robot.lock:
-            robot.lease = {'owner': owner, 'heldSince': int(time.time() * 1000),
-                           'expiresAt': int((time.time() + secs) * 1000)} if secs > 0 else None
-        return {'ok': True, 'lease': robot.lease}
+        return {'ok': True, 'lease': robot.preempt(owner, secs)}
 
     @app.post('/mock/teleport')
     async def mock_teleport(request: Request):

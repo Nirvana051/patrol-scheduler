@@ -2,7 +2,7 @@
 """执行器：把一个任务拆成「当前航点 → 下一个任务航点」的多段云端任务，逐段下发（机器狗不能在航点暂停）。
 
 每段：取游标 → POST /task → 用事件流等到达（同时每 5s 用 GET /task 对账）→ 稳定 → 检查 → 下一段。
-状态判断只用云端附带的 active/terminal/status_code（C5/C6），幂等键 ps-r{run}-l{leg}-a{attempt}（C3）。
+状态判断只用云端附带的 active/terminal/status_code（C5/C6），幂等键 ps-{instance}-r{run}-l{leg}-a{attempt}（C3）。
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'max_retries': 1,
+DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False}
 
@@ -218,12 +218,14 @@ class MissionRunner(threading.Thread):
                 if not path or len(path) < 2:
                     self._set_leg(leg, status='failed', error=f'{self.cur_node} → {target} 在航点拓扑里不连通', ended_at=now_iso())
                     raise LegFailed(f"第 {leg['seq']} 段：{self.cur_node} → {target} 不连通")
-                key = f'ps-r{self.run_id}-l{leg["seq"]}-a{attempt}'
-                cursor = int(self.ctx.gateway.events().get('seq') or 0)        # 下发之前取游标（C10）
+                key = f'ps-{self.ctx.instance_id}-r{self.run_id}-l{leg["seq"]}-a{attempt}'
+                q = self.ctx.events.subscribe()                                 # 先订阅、再取游标、再下发（C10）
+                cursor = int(self.ctx.gateway.events().get('seq') or 0)
                 self._set_leg(leg, path=dumps(path), idempotency_key=key)
                 try:
                     self.ctx.gateway.start_patrol(self.task['map_name'], path, idempotency_key=key, **self._control_options())
                 except RobotError as e:
+                    self.ctx.events.unsubscribe(q)
                     self._set_leg(leg, status='failed', error=f'下发失败：{e}', ended_at=now_iso())
                     if e.status == 409 and attempt <= max_retries + 1:
                         self._log('leg_dispatch_409', f"第 {leg['seq']} 段：控制权被占（{e}），30 秒后重试", level='warn', leg_id=leg['id'])
@@ -234,7 +236,10 @@ class MissionRunner(threading.Thread):
                 self._set_leg(leg, status='dispatched', dispatched_at=now_iso())
                 self._log('leg_dispatched', f"第 {leg['seq']} 段：{self.cur_node} → {target}，路径 {' → '.join(path)}（{self.graph.path_length(path):.1f} m）",
                           leg_id=leg['id'], data={'path': path, 'idempotency_key': key, 'cursor': cursor, 'attempt': attempt})
-                outcome = self._wait_arrival(leg, cursor, target)
+                try:
+                    outcome = self._wait_arrival(leg, cursor, target, q)
+                finally:
+                    self.ctx.events.unsubscribe(q)
 
             if outcome == 'arrived':
                 self.cur_node = target
@@ -262,7 +267,8 @@ class MissionRunner(threading.Thread):
             self._safe_stop_task()
             self._relocate_current_node()
             reason = {'timeout': f"超过 {self.opt.get('leg_timeout')} s 未到达",
-                      'not_started': '任务下发成功但机器人没有动（设备未启动 / 未定位？见 full-patrol.md ②④）'}.get(outcome, outcome)
+                      'not_started': '任务下发成功但机器人没有动（设备未启动 / 未定位？见 full-patrol.md ②④）',
+                      'failed:offline': f"机器人掉线 / 云端不可达超过 {self.opt.get('offline_timeout')} s"}.get(outcome, outcome)
             if attempt <= max_retries and outcome != 'not_started':
                 self._log('leg_retry', f"第 {leg['seq']} 段失败（{reason}），重试 {attempt}/{max_retries}", level='warn', leg_id=leg['id'])
                 continue
@@ -286,14 +292,15 @@ class MissionRunner(threading.Thread):
             time.sleep(0.25)
         return False
 
-    def _wait_arrival(self, leg: dict, cursor: int, target: str) -> str:
-        """返回 arrived | failed:<hex> | stopped | aborted | skipped | timeout | not_started"""
-        q = self.ctx.events.subscribe()
+    def _wait_arrival(self, leg: dict, cursor: int, target: str, q: queue.Queue) -> str:
+        """返回 arrived | failed:<hex> | stopped | aborted | skipped | timeout | not_started | failed:offline"""
         t0 = time.time()
         last_reconcile = 0.0
         progress = False
         leg_timeout = float(self.opt.get('leg_timeout') or 600)
         not_started_timeout = float(self.opt.get('not_started_timeout') or 25)
+        offline_timeout = float(self.opt.get('offline_timeout') or 90)
+        offline_since: float | None = None
         try:
             while True:
                 if self.abort_req.is_set():
@@ -308,8 +315,11 @@ class MissionRunner(threading.Thread):
                     t, d = ev.get('type'), ev.get('data') or {}
                     if t == 'waypoint_reached':
                         progress = True
+                        prog = {'last_reached': d.get('waypoint'), 'index': d.get('index'), 'total': d.get('total'), 'next': d.get('nextTarget')}
                         if leg['status'] != 'navigating':
-                            self._set_leg(leg, status='navigating')
+                            self._set_leg(leg, status='navigating', cloud_task=dumps(prog))
+                        else:
+                            self._set_leg(leg, cloud_task=dumps(prog))
                         if str(d.get('waypoint')) == str(target) and not d.get('nextTarget'):
                             return 'arrived'
                     elif t == 'task_started':
@@ -332,9 +342,14 @@ class MissionRunner(threading.Thread):
                     last_reconcile = now
                     try:
                         st = self.ctx.gateway.task()
+                        offline_since = None
                     except RobotError as e:
                         self._log('reconcile_failed', f'读任务状态失败：{e}', level='warn', leg_id=leg['id'])
                         st = None
+                        if e.status in (0, 502):
+                            offline_since = offline_since or now
+                            if now - offline_since > offline_timeout:
+                                return 'failed:offline'
                     if st:
                         self._set_leg(leg, cloud_task=dumps({k: st.get(k) for k in ('status', 'status_code', 'status_name', 'active',
                                                                                    'terminal', 'error_hex', 'error_name', 'current_target', 'visited')}))
@@ -351,7 +366,7 @@ class MissionRunner(threading.Thread):
                 if now - t0 > leg_timeout:
                     return 'timeout'
         finally:
-            self.ctx.events.unsubscribe(q)
+            pass
 
 
 class RunManager:
@@ -402,6 +417,14 @@ class RunManager:
             raise ValueError('该执行不在进行中')
         getattr(r, action)()
         return self.get_run(run_id)
+
+    def shutdown(self, timeout: float = 20.0) -> None:
+        """进程退出前：中止进行中的执行（会 DELETE /task 停下机器人）并等它收尾。"""
+        with self.lock:
+            r = self.active
+        if r and r.is_alive():
+            r.abort()
+            r.join(timeout)
 
     def active_info(self) -> dict | None:
         with self.lock:

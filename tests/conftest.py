@@ -46,7 +46,7 @@ def mock_gw():
 
 @pytest.fixture()
 def mock_robot(mock_gw):
-    """每个用例前把仿真机器人复位到未初始化、站在航点 1。"""
+    """仿真机器人，复位到未初始化、站在航点 1（不用 app_client 的 mock 契约测试也要干净起点）。"""
     mock_gw.robot.reset()
     mock_gw.robot.teleport(node_id='1', map_name=DEMO_MAP)
     return mock_gw.robot
@@ -59,6 +59,8 @@ def app_client(mock_gw, tmp_path, monkeypatch):
     from app.db import Database
     from app.main import create_app
 
+    mock_gw.robot.reset()                                   # 每个用例从「未初始化、站在航点 1」开始，与用例顺序无关
+    mock_gw.robot.teleport(node_id='1', map_name=DEMO_MAP)
     env = {'CX_HOST': mock_gw.url, 'CX_ROBOT': mock_gw.alias, 'CX_KEY': mock_gw.key,
            'PS_DATA_DIR': str(tmp_path / 'data'), 'PS_DB_PATH': str(tmp_path / 'data' / 'test.db'),
            'TTS_ENGINE': 'none', 'TTS_SINKS': 'browser', 'VLM_PROVIDER': 'mock', 'VLM_MOCK_ANSWER': 'alternate',
@@ -71,7 +73,12 @@ def app_client(mock_gw, tmp_path, monkeypatch):
     with TestClient(app) as c:
         c.ctx = app.state.ctx
         yield c
-    app.state.ctx.stop()
+    app.state.ctx.stop()          # 含 runs.shutdown()：中止残留执行，避免污染下一个用例（共享 mock 机器人）
+
+
+def mock_state(client) -> dict:
+    import requests
+    return requests.get(client.ctx.gateway.host + '/mock/state', timeout=5).json()
 
 
 def init_robot(client, node: str = '1') -> None:
@@ -80,6 +87,8 @@ def init_robot(client, node: str = '1') -> None:
     assert r.status_code == 200, r.text
     r = client.post('/api/robot/init/localize', json={'map_name': DEMO_MAP, 'node_id': node})
     assert r.status_code == 200, r.text
+    st = mock_state(client)
+    print('[debug] after init:', {k: st[k] for k in ('device_started', 'localized', 'x', 'y', 'online')}, 'task', st['task']['status'])
 
 
 def sync_map(client, name: str = DEMO_MAP) -> int:

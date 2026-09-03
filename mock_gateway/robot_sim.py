@@ -324,6 +324,16 @@ class MockRobot:
                 self.lease['expiresAt'] = int(now_ms + seconds * 1000)
             return True, owner
 
+    def preempt(self, owner: str = 'admin', seconds: float = 60.0) -> dict | None:
+        """现场登录的人抢走控制权：无条件覆盖（云端语义是「人可抢程序，程序抢不了人」）。seconds<=0 表示放手。"""
+        with self.lock:
+            if seconds <= 0:
+                self.lease = None
+            else:
+                now_ms = time.time() * 1000
+                self.lease = {'owner': owner, 'heldSince': int(now_ms), 'expiresAt': int(now_ms + seconds * 1000)}
+            return self.lease
+
     def release_lease(self, owner: str) -> None:
         with self.lock:
             if self.lease and self.lease['owner'] == owner:

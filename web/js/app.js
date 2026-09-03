@@ -50,8 +50,8 @@ async function connect() {
   const kinds = ['robot_status', 'event', 'run', 'leg', 'inspection', 'tts'];
   for (const k of kinds) es.addEventListener(k, e => {
     const p = JSON.parse(e.data).payload;
-    if (k === 'robot_status') setStatus(p);
-    else if (k === 'tts') playTts(p);
+    if (k === 'robot_status') { setStatus(p); return; }
+    if (k === 'tts') playTts(p);
     else if (k === 'run') { if (['completed', 'failed', 'aborted'].includes(p.status)) { store.activeRun = null; store.emit('active_run', null); } else { store.activeRun = { run_id: p.id, status: p.status }; store.emit('active_run', store.activeRun); } }
     store.emit(k, p);
   });
@@ -65,6 +65,7 @@ function renderMode() {
 // ── 顶栏状态灯 ──────────────────────────────────────────────────────────────
 function setStatus(s) {
   store.status = s;
+  store.emit('robot_status', s);
   const L = document.getElementById('lights');
   const set = (k, cls, text) => { const el = L.querySelector(`[data-k=${k}]`); el.className = `light ${cls}`; el.lastChild.textContent = text; };
   if (!s || s.reachable === false) { set('online', 'bad', '云端不可达'); }

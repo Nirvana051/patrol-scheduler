@@ -26,7 +26,7 @@
 |------|------|------|-----------------|
 | C1 | 日常读写只走 `/v1/robots/{别名}/…`（冻结契约，认别名）；透传通道 `/api/robots/{机器人ID}/api/…` **只认机器人 ID**，传别名得到误导性的 502 | README §2.2 | 复用 SDK `certaintyx.py`（原样拷贝），透传由 `RobotClient._passthrough` 自动用缓存的 `robotId` |
 | C2 | 写操作需要控制权；用 `auto` 模式密钥，停止写入 30s 后自然释放；现场人可抢走控制权（409），程序抢不回来 | README §2.3 | 不做后台续期；409 视为正常，UI 提示「现场有人操作」，执行器退避重试有限次后暂停 |
-| C3 | 写操作必须带 `Idempotency-Key`，**重试时复用同一个键**；有意的重新下发（新一次尝试）才换新键 | README §2.4 | 分段任务键格式 `ps-r{run}-l{leg}-a{attempt}`；同一 attempt 内 SDK 自动复用 |
+| C3 | 写操作必须带 `Idempotency-Key`，**重试时复用同一个键**；有意的重新下发（新一次尝试）才换新键；键在 10 分钟内**全局**不能重复，否则云端只回放不执行 | README §2.4 | 分段任务键 `ps-{instance}-r{run}-l{leg}-a{attempt}`（`instance` 为每个 DB 生成一次的随机段，避免换库/多套部署撞键 —— mock 测试实际抓到过这个 bug）；同一 attempt 内 SDK 自动复用 |
 | C4 | 限流 5 rps，429 按 `Retry-After` 退避；轮询间隔不小于 1s；要到达通知用事件流，不轮询 | README §2.5 | 全局令牌桶限速（4 rps）；状态轮询 ≥2s；到达用 SSE `events?stream=1`，`since` 游标续接 |
 | C5 | 状态词写读不对称：写 `running` 读回 `navigating`，失败读回 `paused`；判断用响应里的 `active`/`terminal` 布尔或 SDK 的集合 | api-reference「任务状态词」 | 执行器只用 `terminal`/`active`/`status_code`，永不 `== 'running'` |
 | C6 | `error_code` 与 `status` 正交；255 既是暂停也是失败，看 `error_code` 区分 | status.md | 结束判定：`status_code==4` 完成；`255` 看 `error_hex` |

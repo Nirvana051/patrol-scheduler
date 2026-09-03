@@ -2,6 +2,8 @@
 """巡检调度系统入口。  python -m app.main  或  ./run.sh"""
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,9 +23,23 @@ from app.robot.ops import OpsError
 WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
 
 
+def _setup_file_logging(log_dir: Path) -> None:
+    root = logging.getLogger()
+    if any(getattr(h, '_ps_file', False) for h in root.handlers):
+        return
+    log_dir.mkdir(parents=True, exist_ok=True)
+    h = logging.handlers.RotatingFileHandler(log_dir / 'app.log', maxBytes=5_000_000, backupCount=5, encoding='utf-8')
+    h.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    h._ps_file = True
+    root.addHandler(h)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+
 def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI:
     cfg = cfg or Config()
     db = db or Database(cfg.db_path)
+    _setup_file_logging(cfg.data_dir / 'logs')
     ctx = AppContext(cfg, db)
 
     @asynccontextmanager

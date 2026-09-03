@@ -20,11 +20,19 @@ def make_task(client, nodes=('5', '20', '43'), **options):
 
 
 def wait_run(client, run_id, timeout=90):
+    from tests.conftest import mock_state
     t0 = time.time()
+    printed = False
     while time.time() - t0 < timeout:
         r = client.get(f'/api/runs/{run_id}').json()
         if r['status'] in ('completed', 'failed', 'aborted'):
+            st = mock_state(client)
+            print('[debug] run end:', r['status'], r.get('error'), '| mock:', {k: st[k] for k in ('device_started', 'localized', 'x', 'y')}, 'task', st['task']['status'], st['task']['visited'])
             return r
+        if not printed and r['legs'] and r['legs'][0]['status'] in ('dispatched', 'navigating'):
+            printed = True
+            st = mock_state(client)
+            print('[debug] after dispatch:', {k: st[k] for k in ('device_started', 'localized', 'x', 'y')}, 'task', st['task']['status'], st['task']['path'], 'lease', st['lease'])
         time.sleep(0.5)
     raise AssertionError(f'run {run_id} 未在 {timeout}s 内结束: {r["status"]} {[l["status"] for l in r["legs"]]}')
 
@@ -43,7 +51,7 @@ def test_full_mission_completes_with_inspections(app_client, mock_robot):
     assert run['legs'][0]['from_node'] == '1' and run['legs'][0]['path'][0] == '1' and run['legs'][0]['path'][-1] == '5'
     assert run['legs'][1]['from_node'] == '5'                                   # 下一段从上一段终点出发
     for leg in run['legs']:
-        assert re.fullmatch(rf'ps-r{run_id}-l\d+-a1', leg['idempotency_key'])
+        assert re.fullmatch(rf'ps-[0-9a-f]{{6}}-r{run_id}-l\d+-a1', leg['idempotency_key'])
         assert leg['cloud_task'] is None or leg['cloud_task'].get('status') in ('navigating', 'completed', None)
     insp = run['inspections']
     assert len(insp) == 3
@@ -95,6 +103,7 @@ def test_retry_after_failure_uses_new_idempotency_key(app_client, mock_robot):
     assert run['status'] == 'completed', (run['error'], [(l['status'], l['attempt'], l['error']) for l in run['legs']], [e['message'] for e in run['events']])
     leg = run['legs'][0]
     assert leg['attempt'] == 2 and leg['idempotency_key'].endswith('-a2') and leg['status'] == 'done'
+    assert leg['idempotency_key'].split('-')[1] == app_client.ctx.instance_id
     types = [e['type'] for e in run['events']]
     assert 'leg_retry' in types
 

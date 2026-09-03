@@ -66,7 +66,8 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         p_crop = save_jpeg(crop_bytes, run_dir, f'{stem}_crop')
         row['crop_path'] = str(p_crop.relative_to(ctx.media_dir))
         annotated = pano.annotate(img, af, at, forward_deg=forward, label=name)
-        save_jpeg(pano.to_jpeg(annotated, 80), run_dir, f'{stem}_annot')
+        annotated_bytes = pano.to_jpeg(annotated, 80)
+        save_jpeg(annotated_bytes, run_dir, f'{stem}_annot')
     except Exception as e:      # noqa: BLE001
         row['vlm_raw'] = f'裁切失败: {e}'
         ctx.log_event('crop_failed', f'{name}：裁切失败 {e}', level='error', run_id=run_id, leg_id=leg.get('id'))
@@ -80,7 +81,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         return _finish(ctx, row, template, name, t0)
     images = [(crop_bytes, 'image/jpeg')]
     if ctx.cfg.get_bool('VLM_SEND_FULL_PANO'):
-        images.append((data, 'image/jpeg'))
+        images.append((annotated_bytes, 'image/jpeg'))       # 整图带范围标注线，模型能对上「第几度到第几度」
     user = build_user_prompt(prompt, af, at, forward_deg=forward, waypoint_name=name)
     ctx.log_event('vlm_ask', f'{name}：向 VLM 提问（{ctx.vlm.describe()}）', run_id=run_id, leg_id=leg.get('id'),
                   data={'prompt': prompt, 'angle_from': af, 'angle_to': at})

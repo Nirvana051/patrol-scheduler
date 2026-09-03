@@ -2,6 +2,8 @@
 """应用上下文：把配置、DB、总线、网关、后台线程与各适配器装配在一起，供 API 路由与执行器使用。"""
 from __future__ import annotations
 
+import logging
+import secrets
 import threading
 from pathlib import Path
 
@@ -20,10 +22,19 @@ from app.tts.base import build_tts
 from app.vlm.base import build_provider
 
 
+log = logging.getLogger('scheduler')
+
+
 class AppContext:
     def __init__(self, cfg: Config, db: Database) -> None:
         self.cfg, self.db = cfg, db
         cfg.db = db
+        self.instance_id = db.get_setting('PS_INSTANCE_ID')
+        if not self.instance_id:
+            # 幂等键 ps-{instance}-r{run}-l{leg}-a{attempt} 里的实例段：同一 DB 内 run 自增保证不重复，
+            # 换 DB / 多套部署靠这个随机段区分 —— 否则 10 分钟内同键会被云端当成重放而不执行（C3）
+            self.instance_id = secrets.token_hex(3)
+            db.set_setting('PS_INSTANCE_ID', self.instance_id)
         self.bus = Bus()
         self.media_dir: Path = cfg.media_dir
         self.media_dir.mkdir(parents=True, exist_ok=True)
@@ -57,8 +68,9 @@ class AppContext:
                                      scene_provider=lambda: self.scene)
 
     def reconnect(self) -> None:
-        """CX_* 改了之后重建网关与后台线程。"""
-        self.stop()
+        """CX_* 改了之后重建网关与后台线程（不中止执行；有执行在跑时应先中止再改设置）。"""
+        self.status.stop()
+        self.events.stop()
         self._build_gateway()
         self.reload_adapters()
         self.ops = RobotOps(self)
@@ -71,6 +83,8 @@ class AppContext:
             self.events.start()
 
     def stop(self) -> None:
+        if getattr(self, 'runs', None):
+            self.runs.shutdown()
         if self.status:
             self.status.stop()
         if self.events:
@@ -105,6 +119,7 @@ class AppContext:
         row = {'id': row_id, 'ts': ts, 'source': 'system', 'type': etype, 'level': level, 'message': message,
                'run_id': run_id, 'leg_id': leg_id, 'data': data or {}}
         self.bus.publish('event', row)
+        log.log({'warn': logging.WARNING, 'error': logging.ERROR}.get(level, logging.INFO), '[%s] %s', etype, message)
         return row
 
 

@@ -1,0 +1,113 @@
+"""故障场景：掉线、控制权被抢、丢定位、暂停/继续、跳过。"""
+import time
+
+from tests.conftest import init_robot
+from tests.test_e2e_run import make_task, wait_run
+
+
+def _wait_leg_status(client, run_id, statuses, timeout=20):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        r = client.get(f'/api/runs/{run_id}').json()
+        if r['legs'] and r['legs'][0]['status'] in statuses:
+            return r
+        time.sleep(0.2)
+    raise AssertionError(f'leg 未进入 {statuses}: {r["status"]} {[l["status"] for l in r["legs"]]}')
+
+
+def test_offline_mid_leg_fails_fast(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.speed = 1.0
+    try:
+        tid = make_task(app_client, nodes=('20',), offline_timeout=6)
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('dispatched', 'navigating'))
+        mock_robot.set_online(False)
+        run = wait_run(app_client, run_id, timeout=60)
+        assert run['status'] == 'failed' and '掉线' in run['error'], run['error']
+        assert any(e['type'] == 'offline' for e in app_client.get('/api/events?source=cloud').json()['items'])
+    finally:
+        mock_robot.set_online(True)
+        mock_robot.speed = 10.0
+
+
+def test_lease_held_by_human_blocks_preflight(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.preempt('admin', 5)
+    tid = make_task(app_client, nodes=('5',))
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'], timeout=30)
+    assert run['status'] == 'aborted' and '控制权被 admin 持有' in run['error']
+
+
+def test_lease_preempted_mid_run_gives_409_then_abort(app_client, mock_robot):
+    """第一段导航途中现场有人抢走控制权 → 第二段下发 409 → 执行器记录并等待重试 → 人工中止。"""
+    init_robot(app_client, '1')
+    mock_robot.speed = 3.0
+    try:
+        tid = make_task(app_client, nodes=('5', '20'), max_retries=0)
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('dispatched', 'navigating'))
+        mock_robot.preempt('admin', 60)                                     # 人抢走控制权（程序抢不回来）
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            r = app_client.get(f'/api/runs/{run_id}').json()
+            if any(e['type'] == 'leg_dispatch_409' for e in r['events']):
+                break
+            time.sleep(0.3)
+        assert any(e['type'] == 'leg_dispatch_409' for e in r['events']), [e['type'] for e in r['events']]
+        assert r['legs'][0]['status'] == 'done' and r['legs'][1]['status'] == 'failed'
+        assert app_client.post(f'/api/runs/{run_id}/abort').status_code == 200
+        run = wait_run(app_client, run_id, timeout=40)
+        assert run['status'] == 'aborted'
+    finally:
+        mock_robot.preempt('admin', 0)
+        mock_robot.speed = 10.0
+
+
+def test_pause_resume_and_skip(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.speed = 2.0
+    try:
+        tid = make_task(app_client, nodes=('3', '20', '5'))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('dispatched', 'navigating'))
+        assert app_client.post(f'/api/runs/{run_id}/pause').status_code == 200
+        # 第 1 段（很短）完成后应停在 paused
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            r = app_client.get(f'/api/runs/{run_id}').json()
+            if r['status'] == 'paused':
+                break
+            time.sleep(0.3)
+        assert r['status'] == 'paused' and r['legs'][0]['status'] == 'done'
+        assert app_client.post(f'/api/runs/{run_id}/resume').status_code == 200
+        # 第 2 段（长）导航中跳过
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            r = app_client.get(f'/api/runs/{run_id}').json()
+            if r['legs'][1]['status'] in ('dispatched', 'navigating'):
+                break
+            time.sleep(0.2)
+        assert app_client.post(f'/api/runs/{run_id}/skip').status_code == 200
+        run = wait_run(app_client, run_id, timeout=90)
+        assert run['status'] == 'completed'
+        assert [l['status'] for l in run['legs']] == ['done', 'skipped', 'done']
+        assert len(run['inspections']) == 2                      # 跳过的段不检查
+        assert run['legs'][2]['from_node'] not in (None, '')      # 跳过后重新定位当前航点
+    finally:
+        mock_robot.speed = 10.0
+
+
+def test_lost_localization_logged_but_continues(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.speed = 3.0
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('dispatched', 'navigating'))
+        mock_robot.lose_localization(1.0)
+        run = wait_run(app_client, run_id, timeout=60)
+        assert run['status'] == 'completed'
+        assert any(e['type'] == 'lost_localization' for e in run['events'])
+    finally:
+        mock_robot.speed = 10.0

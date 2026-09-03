@@ -1,4 +1,5 @@
 import { api, h, esc, fmt, toast, busy, badge, modal, confirmDialog, statusBadge, RUN_STATUS } from '../api.js';
+import { openWaypointEditor } from './waypoints.js';
 let offs = [];
 
 export async function render(root, { store }) {
@@ -63,7 +64,7 @@ export async function openTaskEditor(task, onSaved) {
         <label class="small">每段超时 (s)<input id="o-timeout" type="number" value="${o.leg_timeout}"></label><label class="small">段失败重试次数<input id="o-retries" type="number" min="0" value="${o.max_retries}"></label>
       </div><div class="form-inline" style="margin-top:8px"><label><input type="checkbox" id="o-return" ${o.return_to_start ? 'checked' : ''}> 结束后返回起点</label><label><input type="checkbox" id="o-reqloc" ${o.require_localized !== false ? 'checked' : ''}> 执行前要求定位就绪（真机务必勾选）</label></div></fieldset>
     </div>
-    <div><div class="card-head"><h2>任务航点顺序</h2><div class="form-inline"><select id="t-add" style="width:220px"></select><button class="btn btn-sm" id="b-add">加入</button></div></div>
+    <div><div class="card-head"><h2>任务航点顺序</h2><div class="form-inline"><select id="t-add" style="width:220px"></select><button class="btn btn-sm" id="b-add">加入</button><button class="btn btn-sm" id="b-new-tw" title="在当前地图上新建一个任务航点并加入本任务">＋ 新建任务航点</button></div></div>
       <ol class="sortable" id="t-items"></ol><div class="help">上下箭头调整顺序。执行时按此顺序逐段前往。</div></div></div>`);
   const foot = h(`<div style="display:flex;gap:8px"><button class="btn" id="t-cancel">取消</button><button class="btn btn-primary" id="t-save">${t.id ? '保存' : '创建'}</button></div>`);
   const m = modal({ title: t.id ? `编辑任务 #${t.id}` : '新建任务', content: body, footer: foot, wide: true });
@@ -73,6 +74,7 @@ export async function openTaskEditor(task, onSaved) {
   const paint = () => { $('#t-items').innerHTML = items.length ? items.map((it, i) => `<li><span class="muted" style="width:22px">${i + 1}.</span><b style="flex:1">${esc(it.name)}</b><span class="small muted">航点 ${esc(it.nav_node_id || '手工')}</span><button class="btn btn-xs" data-i="${i}" data-a="up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn btn-xs" data-i="${i}" data-a="down" ${i === items.length - 1 ? 'disabled' : ''}>↓</button><button class="btn btn-xs btn-danger" data-i="${i}" data-a="rm">×</button></li>`).join('') : '<li class="muted">（空）从右上角下拉加入任务航点</li>';
     $('#t-items').querySelectorAll('button').forEach(b => b.onclick = () => { const i = Number(b.dataset.i); if (b.dataset.a === 'rm') items.splice(i, 1); if (b.dataset.a === 'up') [items[i - 1], items[i]] = [items[i], items[i - 1]]; if (b.dataset.a === 'down') [items[i + 1], items[i]] = [items[i], items[i + 1]]; paint(); }); };
   $('#t-map').onchange = loadTws; await loadTws(); paint();
+  $('#b-new-tw').onclick = () => openWaypointEditor({ map_name: $('#t-map').value }, async (w) => { await loadTws(); if (w && w.id) { items.push({ id: w.id, name: w.name, nav_node_id: w.nav_node_id }); paint(); } });
   $('#b-add').onclick = () => { const w = tws.find(x => String(x.id) === $('#t-add').value); if (w) { items.push({ id: w.id, name: w.name, nav_node_id: w.nav_node_id }); paint(); } };
   foot.querySelector('#t-cancel').onclick = () => m.close();
   foot.querySelector('#t-save').onclick = async (e) => {

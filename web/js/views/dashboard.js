@@ -130,7 +130,7 @@ export async function render(root, { store }) {
       vbox.innerHTML = '<video controls muted autoplay playsinline></video>';
       const video = vbox.querySelector('video');
       if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = v.hls;
-      else { const { default: Hls } = await import('/vendor/hls.min.js').catch(() => ({ default: window.Hls })); const H = Hls || window.Hls; if (H && H.isSupported()) { hls = new H(); hls.loadSource(v.hls); hls.attachMedia(video); hls.on(H.Events.ERROR, () => { vbox.innerHTML = `<span>HLS 无画面（${esc(v.hls)}）—— 见 video.md 排查顺序</span>`; }); } }
+      else { const H = window.Hls; if (H && H.isSupported()) { hls = new H(); hls.loadSource(v.hls); hls.attachMedia(video); hls.on(H.Events.ERROR, () => { vbox.innerHTML = `<span>HLS 无画面（${esc(v.hls)}）—— 见 video.md 排查顺序</span>`; }); } }
       root.querySelector('#video-src').textContent = v.hls;
     } else {
       vbox.innerHTML = `<span>${v.mode === 'mock' ? 'MOCK 模式没有实时流 —— 点「抓一张全景」看合成画面' : '没有 rtspPath'}</span>`;

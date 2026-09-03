@@ -79,3 +79,26 @@ def test_preflight_reports_missing_localization(app_client):
     assert pf['ok'] is False
     bad = {c['key'] for c in pf['checks'] if not c['ok']}
     assert bad == {'localized'}
+
+
+def test_settings_cx_change_reconnects(app_client):
+    old_status = app_client.ctx.status
+    r = app_client.put('/api/settings', json={'RATE_LIMIT_RPS': '10'})
+    assert r.json()['reconnected'] is True and 'RATE_LIMIT_RPS' in r.json()['changed']
+    assert app_client.ctx.status is not old_status and app_client.ctx.status.is_alive() and app_client.ctx.events.is_alive()
+    s = app_client.post('/api/robot/status/refresh').json()
+    assert s['online'] is True
+    assert app_client.ctx.gateway.limiter.rate == 10.0
+
+
+def test_instance_id_persisted_and_unique(app_client, tmp_path):
+    from app.config import Config
+    from app.context import AppContext
+    from app.db import Database
+    iid = app_client.ctx.instance_id
+    assert len(iid) == 6 and app_client.ctx.db.get_setting('PS_INSTANCE_ID') == iid
+    other = AppContext(Config(env_file=tmp_path / 'none.env'), Database(tmp_path / 'other.db'))
+    try:
+        assert other.instance_id != iid           # 另一套 DB 另一个实例段：幂等键不会和这套撞
+    finally:
+        other.stop()

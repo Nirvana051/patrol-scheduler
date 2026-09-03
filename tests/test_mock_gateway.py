@@ -139,3 +139,16 @@ def test_sse_stream_delivers_events(mock_gw, mock_robot):
             if line.startswith('data:'):
                 break
         assert any(l == 'event: emergency' for l in lines)
+
+
+def test_human_preempts_api_lease_but_not_reverse(mock_gw, mock_robot):
+    ok, holder = mock_robot.acquire_lease('api:mock0001')
+    assert ok
+    ok, holder = mock_robot.acquire_lease('admin')            # 程序方式拿不到别人的租约
+    assert not ok and holder == 'api:mock0001'
+    lease = mock_robot.preempt('admin', 30)                   # 人可以直接抢
+    assert lease['owner'] == 'admin'
+    ok, holder = mock_robot.acquire_lease('api:mock0001')
+    assert not ok and holder == 'admin'
+    mock_robot.preempt('admin', 0)
+    assert mock_robot.acquire_lease('api:mock0001')[0]
