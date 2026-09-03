@@ -269,17 +269,12 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
 | T12 | 无登录鉴权；`TTS_COMMAND` 可在设置页改成任意命令 | 默认只绑 127.0.0.1；局域网暴露需反向代理 + 鉴权，并把危险设置移出网页 |
-| T13 | 对账只看 terminal/visited，现场若下发了另一个任务会被误认为「我的」 | 比对 `task_started.path` 与本段 path，识别「不是我的任务」→ 段中止 |
 | T14 | 媒体与事件无限增长 | `scripts/cleanup_media.py` 已有，需 cron 化 |
 | T15 | 前端只有无头截图 + DOM 抽查，无自动化交互测试 | 引入 Playwright（需 pip + 浏览器驱动） |
-| T16 | 无守护进程（systemd 单元） | 提供 `deploy/patrol-scheduler.service` |
-| T17 | 时间戳为本地 ISO 无时区 | 统一带时区或 UTC |
 | T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
-| T19 | 幂等的两种「诚实失败」（首次请求进行中 409 / 响应过大 409）当前按下发失败处理 | 识别后改为「查 GET /task 再决定」 |
-| T20 | 控制权 409 只等 30 s 重试一次 | 可配置退避 + 界面提示等待现场放手 |
 
 ### 9.3 已解决（留档）
-幂等键跨库撞键（加实例段）；测试残留执行线程污染共享 mock（`RunManager.shutdown`）；`pkill -f` 误杀自身 shell（pid 文件）；无头 Chrome 遇 SSE 不结束（`?nosse=1`）；`item_seq` 被对账写入覆盖（独立列 + schema v2）；mock `preempt seconds=0` 被当缺省；控制权测试在前置检查被拦（改为途中抢占）。
+T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停对方任务）；T16 systemd 单元（`deploy/`）；T17 时间戳带时区偏移；T19 幂等诚实失败（409 后查 `GET /task`，路径一致即按已下发）；T20 控制权 409 等待/重试次数可配（任务选项）；幂等键跨库撞键（加实例段）；测试残留执行线程污染共享 mock（`RunManager.shutdown`）；`pkill -f` 误杀自身 shell（pid 文件）；无头 Chrome 遇 SSE 不结束（`?nosse=1`）；`item_seq` 被对账写入覆盖（独立列 + schema v2）；mock `preempt seconds=0` 被当缺省；控制权测试在前置检查被拦（改为途中抢占）。
 
 ---
 

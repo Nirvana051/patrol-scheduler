@@ -1,0 +1,20 @@
+# systemd 单元示例：sudo cp deploy/patrol-scheduler.service /etc/systemd/system/ && sudo systemctl enable --now patrol-scheduler
+# 按实际路径/用户修改 WorkingDirectory / User。凭据放 config/.env（仓库已忽略）。
+[Unit]
+Description=巡检调度系统（certaintyX 机器狗）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=leo
+WorkingDirectory=/home/leo/agent/scheduler
+ExecStart=/home/leo/agent/scheduler/.venv/bin/python -m app.main
+Restart=on-failure
+RestartSec=5
+# 退出时应用会先中止进行中的执行并 DELETE /task 停下机器人，再停线程；给它足够时间
+TimeoutStopSec=40
+Environment=PS_LOG_LEVEL=info
+
+[Install]
+WantedBy=multi-user.target

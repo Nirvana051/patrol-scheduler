@@ -128,3 +128,27 @@ def test_stall_detection_when_robot_keeps_avoiding(app_client, mock_robot):
     finally:
         mock_robot.avoiding_until = 0
         mock_robot.speed = 10.0
+
+
+def test_external_task_replaces_ours_aborts_without_stopping_it(app_client, mock_robot):
+    """导航途中现场下发了别的任务（task_started 的 path 不是本段的）→ 本次执行中止，且不去停对方的任务。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')
+    mock_robot.speed = 1.5
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        mock_robot.start_task(DEMO_MAP, ['3', '4', '5'], {})            # 现场直接下发了另一条路径
+        run = wait_run(app_client, run_id, timeout=30)
+        assert run['status'] == 'aborted' and '外部替换' in run['error'], run['error']
+        assert any(e['type'] == 'external_task' for e in run['events'])
+        st = mock_robot.snapshot_state()['task']
+        assert st['path'] == ['3', '4', '5'] and st['status'] in ('navigating', 'completed')   # 没有被我们停掉
+    finally:
+        mock_robot.speed = 10.0
+
+
+def test_timestamps_carry_timezone(app_client):
+    ev = app_client.get('/api/events?limit=1').json()['items'][0]
+    assert ev['ts'][-6] in '+-' and ev['ts'][-3] == ':'                     # …+08:00

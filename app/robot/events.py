@@ -178,7 +178,8 @@ class CloudEventListener(threading.Thread):
         ts_ms = ev.get('ts')
         ts = None
         if ts_ms:
-            ts = time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(ts_ms / 1000)) + f'.{int(ts_ms % 1000):03d}'
+            import datetime as _dt
+            ts = _dt.datetime.fromtimestamp(ts_ms / 1000).astimezone().isoformat(timespec='milliseconds')
         run_id = leg_id = None
         if self.run_ref is not None:
             try:

@@ -32,7 +32,7 @@ def main() -> int:
     cfg = Config()
     db = Database(cfg.db_path)
     cfg.db = db
-    cutoff = dt.datetime.now() - dt.timedelta(days=a.keep_days)
+    cutoff = dt.datetime.now().astimezone() - dt.timedelta(days=a.keep_days)
     cutoff_ts = cutoff.timestamp()
     freed, removed = 0, 0
 

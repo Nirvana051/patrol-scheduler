@@ -15,7 +15,7 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'max_retries': 1,
+DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False}
 
@@ -116,7 +116,8 @@ class MissionRunner(threading.Thread):
                 self._execute_leg(leg)
             self._finish('completed', None)
         except RunAbort as e:
-            self._safe_stop_task()
+            if '外部替换' not in str(e):
+                self._safe_stop_task()
             self._finish('aborted', str(e))
         except LegFailed as e:
             self._safe_stop_task()
@@ -227,14 +228,20 @@ class MissionRunner(threading.Thread):
                 try:
                     self.ctx.gateway.start_patrol(self.task['map_name'], path, idempotency_key=key, **self._control_options())
                 except RobotError as e:
-                    self.ctx.events.unsubscribe(q)
-                    self._set_leg(leg, status='failed', error=f'下发失败：{e}', ended_at=now_iso())
-                    if e.status == 409 and attempt <= max_retries + 1:
-                        self._log('leg_dispatch_409', f"第 {leg['seq']} 段：控制权被占（{e}），30 秒后重试", level='warn', leg_id=leg['id'])
-                        if self._sleep_unless_abort(30.0):
-                            raise RunAbort('人工中止')
-                        continue
-                    raise LegFailed(f"第 {leg['seq']} 段下发失败：{e}")
+                    if e.status == 409 and self._dispatch_actually_landed(path):
+                        # 幂等的「诚实失败」：首次请求还在处理 / 响应太大没留存 —— 查 GET /task 发现任务已在跑，继续等
+                        self._log('leg_dispatch_409_landed', f"第 {leg['seq']} 段：下发返回 409（{e}），但云端任务已是本段路径，按已下发处理", level='warn', leg_id=leg['id'])
+                    else:
+                        self.ctx.events.unsubscribe(q)
+                        self._set_leg(leg, status='failed', error=f'下发失败：{e}', ended_at=now_iso())
+                        lease_retries = int(self.opt.get('lease_retries') or 0)
+                        wait_s = float(self.opt.get('lease_retry_seconds') or 30)
+                        if e.status == 409 and attempt <= lease_retries:
+                            self._log('leg_dispatch_409', f"第 {leg['seq']} 段：控制权被占（{e}），{wait_s:.0f} 秒后重试（{attempt}/{lease_retries}）", level='warn', leg_id=leg['id'])
+                            if self._sleep_unless_abort(wait_s):
+                                raise RunAbort('人工中止')
+                            continue
+                        raise LegFailed(f"第 {leg['seq']} 段下发失败：{e}")
                 self._set_leg(leg, status='dispatched', dispatched_at=now_iso())
                 self._log('leg_dispatched', f"第 {leg['seq']} 段：{self.cur_node} → {target}，路径 {' → '.join(path)}（{self.graph.path_length(path):.1f} m）",
                           leg_id=leg['id'], data={'path': path, 'idempotency_key': key, 'cursor': cursor, 'attempt': attempt})
@@ -262,8 +269,10 @@ class MissionRunner(threading.Thread):
                 self._log('leg_skipped', f"第 {leg['seq']} 段已跳过", level='warn', leg_id=leg['id'])
                 self._relocate_current_node()
                 return
-            if outcome in ('aborted', 'stopped'):
+            if outcome in ('aborted', 'stopped', 'external'):
                 self._set_leg(leg, status='aborted', ended_at=now_iso(), error=outcome)
+                if outcome == 'external':
+                    raise RunAbort('云端任务被外部替换（现场下发了别的任务），本次执行中止，不去停对方的任务')
                 raise RunAbort('人工中止' if outcome == 'aborted' else '云端任务被外部停止（现场有人接管？）')
             # failed:* / timeout / not_started
             if outcome.startswith('failed:0x'):
@@ -284,6 +293,13 @@ class MissionRunner(threading.Thread):
                 continue
             self._set_leg(leg, status='failed', error=reason, ended_at=now_iso())
             raise LegFailed(f"第 {leg['seq']} 段失败：{reason}")
+
+    def _dispatch_actually_landed(self, path: list[str]) -> bool:
+        try:
+            st = self.ctx.gateway.task()
+        except RobotError:
+            return False
+        return bool(st.get('active')) and [str(x) for x in (st.get('path') or [])] == [str(x) for x in path]
 
     def _relocate_current_node(self) -> None:
         try:
@@ -336,6 +352,10 @@ class MissionRunner(threading.Thread):
                         if str(d.get('waypoint')) == str(target) and not d.get('nextTarget'):
                             return 'arrived'
                     elif t == 'task_started':
+                        ev_path = [str(x) for x in (d.get('path') or [])]
+                        if ev_path and ev_path != [str(x) for x in loads(leg.get('path'), [])]:
+                            self._log('external_task', f"云端开始了另一个任务（路径 {' → '.join(ev_path)}），不是本段的 —— 现场有人下发了任务？", level='error', leg_id=leg['id'])
+                            return 'external'
                         progress = True
                         self._set_leg(leg, status='navigating')
                     elif t == 'task_completed':

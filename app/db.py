@@ -15,7 +15,8 @@ SCHEMA_VERSION = 2
 
 
 def now_iso() -> str:
-    return _dt.datetime.now().isoformat(timespec='milliseconds')
+    """本地时间、带时区偏移（如 2026-09-04T01:00:00.000+08:00），跨机器对账不歧义。"""
+    return _dt.datetime.now().astimezone().isoformat(timespec='milliseconds')
 
 
 def dumps(v: Any) -> str:
