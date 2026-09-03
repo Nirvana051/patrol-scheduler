@@ -4,7 +4,7 @@
 按「当前航点 → 下一个任务航点」分段下发巡检；到点后抓全景 → 按角度范围裁切 → VLM 判「是 / 不是」→ 按答案模版 TTS 播报。
 
 主管理文档（目标、宪法约束、架构、计划、进度、问题、规划）：`../Sample_web_api/docs/task.md`（同步副本 `docs/task.md`）。
-开发日志 `docs/DEVLOG.md`，问题清单 `docs/TODO.md`，路线图 `docs/ROADMAP.md`，变更记录 `CHANGELOG.md`，**真机上线手册 `docs/OPERATIONS.md`**。
+开发日志 `docs/DEVLOG.md`，问题清单 `docs/TODO.md`，路线图 `docs/ROADMAP.md`，变更记录 `CHANGELOG.md`，**真机上线手册 `docs/OPERATIONS.md`**，界面截图 `docs/SCREENSHOTS.md`。
 本系统自身的 REST 文档在运行时的 `/api/docs`（FastAPI 自动生成）。默认只绑定 127.0.0.1、无登录；要暴露到局域网请自行加反向代理与鉴权。
 
 ## 跑起来

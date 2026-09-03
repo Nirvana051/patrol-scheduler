@@ -94,7 +94,7 @@ certaintyX 云端网关  ──隧道──▶ 机器狗          ← 开发/测
 - 端点与响应形状与 `api-reference.md` 一致（信封、字段名、嵌套层数）；`/v1/status-codes` 回放 2026-09-03 从生产抓取的真实 JSON。
 - 行为复刻：状态词不对称（写 running 读 navigating，失败读 paused）；`Location` 恒为 1；未定位时 `/position` 503；透传传别名 → 502「机器人不在线」；缺 `active` 的急停体 = 取消急停；同键重放 + `Idempotent-Replay: true`；5 rps 限流 429 + `Retry-After`；未知 `task_id` → 400。
 - 机器人运动学仿真：沿 path 匀速运动（`MOCK_SPEED`，默认 1 m/s，可加速），`visited` 下发瞬间含起点，逐点产生 `waypoint_reached`（含 `index/total/nextTarget`），结束 `task_completed`；`events` 500 条环形缓冲 + `since` + `stream=1` SSE（心跳注释帧、`Last-Event-ID`）。
-- 故障注入 `/mock/*`：下一段避障失败（`task_failed` 0x234B）、掉线、`ros_available=false`、现场抢控制权（409）、丢事件（测对账）。
+- 故障注入 `/mock/*`：下一段避障/规划失败（`task_failed` 0x234B/0x234C）、掉线、`ros_available=false`、现场抢控制权（`preempt`，复刻「人可抢程序、程序抢不了人」）、持续避障（停滞）、丢定位、丢事件（测对账）、传送、复位、调速。
 - 演示地图：`fixtures/map_demo.json`，~40 个航点的环路 + 支路，编号相邻的点相距 0.5–3 m（贴近真实 87 点地图的密度）。
 
 ---
@@ -152,8 +152,9 @@ for 每个任务航点 T（按 seq）:
               task_failed      → 段失败（errorHex），stop_task，按 max_retries 重试（新 attempt 新键）或标记失败并暂停执行
               task_stopped     → 外部停止 → 执行标记 aborted
               obstacle / localization / emergency → 记录（丢定位可配置为暂停）
-            每 5s GET /task 对账（C10 兜底）：terminal && status_code==4 → 到达；255 → 失败；
-            超过 leg_timeout 仍 idle/无进展 → 「任务未执行」（多半是没初始化，C8）
+            每 5s GET /task 对账（C10 兜底）：terminal && status_code==4 → 到达；255 → 失败（原因附云端 error_name/error_text）；
+            not_started_timeout 内仍 idle/无进展 → 「任务未执行」（多半是没初始化，C8）；
+            云端不可达/掉线超过 offline_timeout → 段失败；active 但超过 stall_timeout 没有新到达 → 「停滞」；leg_timeout 兜底
    [稳定]   settle_seconds（默认 2s）让机身稳住
    [检查]   snapshot（RTSP TCP）→ 存全景 → 按 [angle_from, angle_to] 裁切 → VLM(prompt, 全景+裁切)
             → 解析为 yes/no/unknown → 按 answer_template 选 TTS 文本 → 合成 → 汇出到扬声器
@@ -161,7 +162,8 @@ for 每个任务航点 T（按 seq）:
    cur = T.nav_node
 [结束]   可选 return_to_start 再走一段；runs.status=completed；不停设备（C14）
 [任何未预期异常]  estop()（可配置）→ stop_task() → runs.status=failed（C15）
-[人工干预]  暂停（当前段完成后停）/ 跳过当前航点 / 中止（DELETE /task）/ 急停
+[人工干预]  暂停（当前段完成后停）/ 跳过当前航点 / 中止（DELETE /task）/ 急停；失败或中止后可「从第 N 个航点重跑剩余航点」（新执行）
+[进程退出]  中止进行中的执行并 DELETE /task，再停线程（真机安全）
 ```
 
 ---
@@ -220,44 +222,91 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 ---
 
-## 8. 开发计划与进度
+## 8. 开发计划与进度（2026-09-03 22:00 → 09-04 08:00 CST）
 
-| 阶段 | 时间 | 内容 | 状态 |
+| 阶段 | 时间 | 内容 | 结果 |
 |------|------|------|------|
-| P0 环境与文档 | 22:00–23:00 | 读宪法、摸环境、venv、本文档、仓库骨架 | ✅ 完成 |
-| P1 mock 网关 | 22:30–23:00 | 契约仿真 + 运动学 + 事件流 + 故障注入 + 自测 | ✅ 完成（curl 逐项验证 + pytest 契约测试） |
-| P2 后端核心 | 22:40–23:00 | DB、SDK 包装、事件监听、状态轮询、规划、执行器、检查流水线、VLM/TTS 适配器、REST | ✅ 完成 |
-| P3 前端 | 22:45–23:10 | 七个视图，全景角度编辑器，地图画布，SSE 实时 | ✅ 首版完成，截图验收通过 |
-| P4 测试 | 23:00–23:20 | 单测 + 对 mock 的端到端执行 + 无头浏览器截图验收 | ✅ 首版通过；继续加固中 |
-| P5 收尾 | 06:00–08:00 | 文档、日志、TODO、路线图、打 tag | ⬜ |
+| P0 环境与文档 | 22:00–22:30 | 读宪法、摸环境、venv、本文档 v1、仓库骨架 | ✅ |
+| P1 mock 网关 | 22:30–23:00 | 契约仿真 + 运动学 + 事件流 + 故障注入；curl 逐项验证 | ✅ |
+| P2 后端核心 | 22:40–23:00 | DB、SDK 包装、事件监听、状态轮询、规划、执行器、检查流水线、VLM/TTS 适配器、REST/SSE | ✅ |
+| P3 前端 | 22:45–23:10 | 七个视图、全景角度编辑器、地图画布、SSE 实时 | ✅ 截图验收 |
+| P4 测试 | 23:00–01:20 | 单测 + mock 契约 + API + 端到端；查出并修复幂等键撞键、测试互相污染 | ✅ 48 → 66 用例全绿 |
+| P5 加固 | 01:20–04:00 | 掉线/停滞/控制权/暂停跳过/丢定位场景；从失败段重跑；schema v2 迁移；事件归属；机头校准；系统自检；清理脚本 | ✅ |
+| P6 真机准备与收尾 | 01:30–08:00 | 只读冒烟脚本、上线手册、截图集、lint/lock、文档与规划 | ✅ |
 
-进度日志（详见 `scheduler/docs/DEVLOG.md`）：
+**交付物**：`/home/leo/agent/scheduler/`（git，tag `v0.1.0`、`v0.2.0`），约 3.7k 行后端 + 1.0k 行 mock + 1.1k 行前端 + 1.1k 行测试（66 个用例，2 分钟跑完）+ 0.5k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
 
-- 2026-09-03 22:05 读完全部宪法文档与示例；确认无真机密钥、`GET /v1` 与 `/v1/status-codes` 可免鉴权抓取（已存为 mock 夹具）。
-- 2026-09-03 22:12 venv 建好（fastapi 0.141 / uvicorn 0.52 / edge-tts / anthropic 1.3）；Chrome 无头截图、ffmpeg 合成图、edge-tts 中文合成均验证通过。
-- 2026-09-03 22:25 本文档 v1 写完；仓库骨架初始化。
-- 2026-09-03 23:00 mock 网关契约逐项验证通过；后端 + 前端 + 测试首版提交（b2c2998, eea9499）。
-- 2026-09-03 23:10 演示任务在 mock 上端到端跑通：4 段 / 3 次检查 / TTS / 94 条事件；8 个视图无头截图无 JS 报错。
+**关键时间线**（细节见 `scheduler/docs/DEVLOG.md`）：
+- 22:05 宪法读完，确认无真机密钥；`GET /v1`、`/v1/status-codes` 免鉴权抓取存为 mock 夹具。
+- 23:00 mock 网关契约验证通过；后端/前端/测试首版提交。
+- 23:10 演示任务（消防栓 → 通道方格 → 安全出口 → 返回起点）在 mock 上 30 s 跑完 4 段 / 3 次检查 / TTS。
+- 01:00 查出「测试互相污染」：残留执行线程对共享 mock 机器人下发/停止任务 → `RunManager.shutdown()`（也是真机上进程退出的正确行为）。
+- 01:15 **mock 抓到真 bug**：幂等键 `ps-r{run}-l{leg}-a{attempt}` 换库后重复，云端 10 分钟内只回放不执行 → 加实例段。
+- 01:20 全绿，`v0.1.0`。
+- 02:40 开发实例 v1 → v2 迁移；避障故障 → 自动重试成功；从第 2 个航点重跑。
+- 03:20 执行详情缺云端事件 → 云端事件挂到进行中的执行/段；段失败原因附云端错误名。
+- 04:00 ruff 接入、`requirements.lock`、截图集。
 
 ---
 
-## 9. 问题与 TODO（持续更新，最终版见 `scheduler/docs/TODO.md`）
+## 9. 问题清单（最终版；同 `scheduler/docs/TODO.md`）
 
-| # | 问题 | 影响 | 状态 / 处置 |
+### 9.1 必须在真机上才能关闭的
+| # | 问题 | 影响 | 处置 / 状态 |
 |---|------|------|-----------|
-| T1 | 本机没有真机 API 密钥，所有验证在 mock 上完成 | 真机联调前需要一次「对照 `04_verify_flow.py` 的实测」 | 待用户提供 `CX_KEY` 后跑 `scripts/real_smoke.sh`（只读）|
-| T2 | 云端 API 没有「扬声器」端点 | TTS 无法直接送到机器狗 | 汇出做成插件：浏览器 / 本机 / 用户已有 `robot-audio` ZMQ 服务 / Webhook；机器狗端待接口 |
-| T3 | 全景图中「机头正前方」对应的列未知 | 角度范围与实际方位的对应需现场校准 | 已做「设置 → 机头校准」工具：抓一张全景、拖蓝线到机头方向、保存 `FORWARD_DEG`；真机首帧时做一次 |
-| T4 | 云端不暴露地图点云下载 | 地图页点云背景需手工上传 | 保留 `pointcloud` 上传 + 下采样接口 |
-| T5 | 机器人不能在航点暂停 | 只能分段下发；每段结束云端任务进入 terminal | 已按分段设计；段间有 settle 时间 |
+| T1 | **本机没有真机 API 密钥**，全部验证在 mock 上完成 | mock 与真实网关的差异（响应字段细节、时序、任务下发后的状态推进、HLS/RTSP 可用性）只能靠真机暴露 | 拿到 `CX_KEY` 后按 `docs/OPERATIONS.md`：`scripts/real_smoke.py`（只读）→ 上游 `04_verify_flow.py` → 单点任务 → 全流程；差异回填到 mock |
+| T3 | 全景图中「机头正前方」对应的列未知 | 角度范围 ↔ 实际方位 | 已做「设置 → 机头校准」工具；真机首帧校准一次 |
+| T6 | RTSP 抓一帧的耗时与成功率未知（ffmpeg TCP 连接可能 2–10 s） | 检查时长、settle 时间 | 记录 `snapshot` 事件耗时；若不稳定，`SNAPSHOT_SOURCE` 增加 `hls`（取最新分片解一帧）备选 |
+| T7 | `waypoint_reached` 产生时机身可能仍在减速/转向 | 抓图模糊、角度偏 | `SETTLE_SECONDS`（默认 2 s）按实测调；必要时到点后再读一次 `/position` 的 yaw 修正角度零点 |
+| T8 | 分段下发间隙：每段结束 → 检查（3–15 s）→ 下一段起步，真机 `nav_preprocess` 耗时未知 | `not_started_timeout`（25 s）是否够 | 实测后调；执行记录里每段有下发/到达时刻可回看 |
+| T9 | 巡检途中丢定位目前只记录（可配置为段失败） | 需人工介入 | 做「在最近航点重新定位后继续」的引导流程（roadmap R2） |
+
+### 9.2 功能缺口（不阻塞 mock 演示）
+| # | 问题 | 处置 / 状态 |
+|---|------|-----------|
+| T2 | 云端 API 没有机器狗扬声器端点 | 汇出插件化：browser / local / **zmq（对接用户已有 `tts_cmq_dev/robot-audio`，需机器人端加 `play_tts` 动作或改为传音频文件）** / webhook |
+| T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
+| T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
+| T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
+| T12 | 无登录鉴权；`TTS_COMMAND` 可在设置页改成任意命令 | 默认只绑 127.0.0.1；局域网暴露需反向代理 + 鉴权，并把危险设置移出网页 |
+| T13 | 对账只看 terminal/visited，现场若下发了另一个任务会被误认为「我的」 | 比对 `task_started.path` 与本段 path，识别「不是我的任务」→ 段中止 |
+| T14 | 媒体与事件无限增长 | `scripts/cleanup_media.py` 已有，需 cron 化 |
+| T15 | 前端只有无头截图 + DOM 抽查，无自动化交互测试 | 引入 Playwright（需 pip + 浏览器驱动） |
+| T16 | 无守护进程（systemd 单元） | 提供 `deploy/patrol-scheduler.service` |
+| T17 | 时间戳为本地 ISO 无时区 | 统一带时区或 UTC |
+| T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
+| T19 | 幂等的两种「诚实失败」（首次请求进行中 409 / 响应过大 409）当前按下发失败处理 | 识别后改为「查 GET /task 再决定」 |
+| T20 | 控制权 409 只等 30 s 重试一次 | 可配置退避 + 界面提示等待现场放手 |
+
+### 9.3 已解决（留档）
+幂等键跨库撞键（加实例段）；测试残留执行线程污染共享 mock（`RunManager.shutdown`）；`pkill -f` 误杀自身 shell（pid 文件）；无头 Chrome 遇 SSE 不结束（`?nosse=1`）；`item_seq` 被对账写入覆盖（独立列 + schema v2）；mock `preempt seconds=0` 被当缺省；控制权测试在前置检查被拦（改为途中抢占）。
 
 ---
 
-## 10. 未来规划（草案，最终版见 `scheduler/docs/ROADMAP.md`）
+## 10. 未来规划（最终版；同 `scheduler/docs/ROADMAP.md`）
 
-1. 真机联调：只读冒烟 → 单段下发 → 全流程；按实测校准 `forward_deg`、settle 时间、leg 超时。
-2. 多机器人：`robots` 表 + 每机器人一组监听/轮询/执行线程。
-3. 定时任务（cron）与任务队列；失败自动重试策略细化（避障失败 → 换路线）。
-4. 全景 → 透视重投影（py360convert）后再给 VLM，减少等距投影的拉伸干扰。
-5. 检查结果统计与报表（按航点的通过率、误报回看与人工改判）。
-6. 权限与审计（多用户、操作日志）。
+**R1 真机联调（拿到密钥后的第一周）**
+1. `real_smoke.py` 只读核对 → 上游 `04_verify_flow.py` → 网页初始化 → 单航点任务 → 三航点全流程。
+2. 实测并回填：抓帧耗时（T6）、到点稳定时间（T7）、`nav_preprocess`/起步时间（T8）、机头角度（T3）、限速余量。
+3. 把 mock 与真机的差异逐条回填到 `mock_gateway`，保持测试可信。
+
+**R2 可靠性（2–3 周）**
+4. 丢定位半自动恢复：暂停 → 引导用最近航点重定位 → 继续（T9）。
+5. 外部任务识别（T13）、控制权退避策略（T20）、幂等诚实失败处理（T19）。
+6. 守护与运维：systemd 单元、自动清理 cron、日志轮转已就位；健康检查接入监控。
+
+**R3 判读质量（并行）**
+7. 真 VLM 评测集：每个任务航点收集若干参考图 + 人工标注「是/不是」，脚本批量跑 `test-vlm` 出准确率/误报率；据此调 prompt 与裁切范围、是否附整图。
+8. 等距投影 → 透视重投影（py360convert）再给模型；对比评测。
+9. 结果统计与人工改判：按航点通过率、误报回看、改判入库作为评测样本。
+
+**R4 平台化（1–2 月）**
+10. 多机器人（robots 表、每机器人一组监听/轮询/执行线程、页面切换）。
+11. 定时任务与队列（cron 表达式、冲突检测、失败自动重试策略：避障失败换路线）。
+12. 权限与审计（登录、角色、操作日志）；局域网部署（反向代理 + TLS）。
+13. 通知：检查不通过推送 IM/Webhook；日报。
+
+**R5 与现场系统打通**
+14. 机器狗端播报：与 `robot-audio` ZMQ 服务对接 `play_tts`（T2）。
+15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；多地图切换与重建图后的任务航点迁移工具。
+16. 巡检模板库：常见点位（消防栓、通道、配电箱、指示牌）的 prompt/答案模版可复用。
