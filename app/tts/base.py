@@ -4,7 +4,7 @@
 云端 API 没有扬声器端点（docs/TODO T2），所以汇出做成插件：
 * browser  —— 经 SSE 推给网页，由浏览器播放音频（无音频文件时用浏览器自带 speechSynthesis 念文本）
 * local    —— 本机扬声器（ffplay）
-* zmq      —— 用户已有的 robot-audio ZMQ 服务（tts_cmq_dev/robot-audio），需要机器人端补一个 play_tts 动作
+* http     —— 本项目自带的 audio_server（audio_server/，纯标准库，部署在机器狗或现场 PC 上）
 * webhook  —— POST JSON 到任意地址
 """
 from __future__ import annotations
@@ -105,37 +105,43 @@ class LocalSpeakerSink(AudioSink):
         return 'ok'
 
 
-class ZmqRobotAudioSink(AudioSink):
-    """对接 tts_cmq_dev/robot-audio 的 ZMQ REQ/REP 协议：{"action": ..., "params": {...}}。
+class AudioServerSink(AudioSink):
+    """推给本项目自带的 audio_server（机器狗 / 现场 PC 上的喇叭）。
 
-    现有服务只有 prepare_audio / play_audio(task,id) / ping；这里发 play_tts（文本）——机器人端需补这一动作
-    （见 docs/TODO.md T2）。pyzmq 未安装时如实报告。
+    有音频文件就直接把字节 POST 到 /play-audio（对方不需要联网也不需要 TTS 引擎）；
+    只有文本（TTS_ENGINE=none）时 POST /play 让对方自己合成（对方要配引擎）。
     """
-    name = 'zmq'
+    name = 'http'
 
-    def __init__(self, endpoint: str, timeout_ms: int = 3000) -> None:
-        self.endpoint = endpoint
-        self.timeout_ms = timeout_ms
+    def __init__(self, url: str, token: str = '', timeout: float = 8.0) -> None:
+        self.url = url.rstrip('/')
+        self.token = token
+        self.timeout = timeout
+
+    def _headers(self, extra: dict | None = None) -> dict:
+        h = dict(extra or {})
+        if self.token:
+            h['X-Audio-Token'] = self.token
+        return h
 
     def play(self, text, audio_path, audio_url, meta):
+        import urllib.parse
+        import requests
         try:
-            import zmq
-        except ImportError:
-            return 'unavailable: 未安装 pyzmq'
-        ctx = zmq.Context.instance()
-        s = ctx.socket(zmq.REQ)
-        s.setsockopt(zmq.LINGER, 0)
-        s.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
-        s.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
-        try:
-            s.connect(self.endpoint)
-            s.send_json({'action': 'play_tts', 'params': {'text': text, 'wait': False, 'meta': meta}})
-            rep = s.recv_json()
-            return 'ok' if rep.get('status') == 'ok' else f"error: {rep.get('error')}"
-        except Exception as e:      # noqa: BLE001
+            if audio_path is not None:
+                ctype = 'audio/wav' if str(audio_path).endswith('.wav') else 'audio/mpeg'
+                r = requests.post(f'{self.url}/play-audio?{urllib.parse.urlencode({"text": text})}', data=Path(audio_path).read_bytes(),
+                                  headers=self._headers({'Content-Type': ctype}), timeout=self.timeout)
+            else:
+                r = requests.post(f'{self.url}/play', json={'text': text, 'wait': False}, headers=self._headers(), timeout=self.timeout)
+            if r.ok:
+                return 'ok'
+            try:
+                return f"error: HTTP {r.status_code} {r.json().get('error', '')}"
+            except ValueError:
+                return f'error: HTTP {r.status_code}'
+        except requests.RequestException as e:
             return f'error: {e}'
-        finally:
-            s.close()
 
 
 class WebhookSink(AudioSink):
@@ -219,8 +225,8 @@ def build_tts(cfg, bus, media_dir: Path) -> TtsService:
             sinks.append(BrowserSink(bus))
         elif name == 'local':
             sinks.append(LocalSpeakerSink())
-        elif name == 'zmq':
-            sinks.append(ZmqRobotAudioSink(cfg.get('TTS_ZMQ_ENDPOINT')))
+        elif name == 'http' and cfg.get('TTS_AUDIO_SERVER_URL'):
+            sinks.append(AudioServerSink(cfg.get('TTS_AUDIO_SERVER_URL'), cfg.get('TTS_AUDIO_SERVER_TOKEN')))
         elif name == 'webhook' and cfg.get('TTS_WEBHOOK_URL'):
             sinks.append(WebhookSink(cfg.get('TTS_WEBHOOK_URL')))
     if not sinks:

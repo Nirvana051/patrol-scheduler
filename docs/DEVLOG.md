@@ -160,3 +160,7 @@
 - `scripts/real_smoke.py`：鉴权、别名→ID、在线、事件流 SSE（seq=60）、HLS（1280×640）都通；机器人端接口（telemetry/position/maps/task/透传）全部 502「机器人端服务不可用：Cannot connect to host 127.0.0.1:8761」——agent 在线但机器人本地 API 服务没起来。这是机器人侧的状态，不是密钥或本系统的问题。
 - RTSP 抓帧实测：TCP 连接 + 首关键帧 ≈ 3.0 s/帧（3 次 2.94–3.14 s），HLS 0.78 s；4 帧内容完全相同——当前推的是静止的 Gazebo 仿真场景（蓝天、灰地、彩色圆柱）。样张存 `docs/screenshots/real-pano-sample.jpg`。
 - 切到 REAL 模式前先把演示定时计划全部停用（否则 19:30 会对真机下发 mock 地图的任务）。开发实例在 07:30 那趟演示跑完后随会话一起退出（用户中午回来时已不在），已按 REAL 配置重新拉起。
+
+## 14:20 播报服务自带化（去掉 tts_cmq_dev / pyzmq 依赖）
+- 新增 `audio_server/`：纯标准库 HTTP 服务（`/health` `/play-audio` `/play` `/stop`，可选口令），单队列顺序播放、临时文件播完即删；播放器自动挑 ffplay/mpg123/paplay/aplay，测试用 dry 模式。
+- 调度系统 `zmq` 汇出移除，改为 `http` 汇出：有音频就推字节（机器人端无需联网/无需 TTS），只有文本就让对方合成（对方没引擎则如实 501）。设置项 `TTS_AUDIO_SERVER_URL/TOKEN`；systemd 单元 `deploy/patrol-audio.service`；`make audio-server`。

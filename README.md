@@ -13,7 +13,7 @@
 - **任务与执行**：有序任务航点 → 分段下发（当前航点 → 下一个任务航点，`neighbors` 最短路）；到点 → 抓全景 → 裁切 → VLM → TTS；暂停/跳过/中止、失败后从剩余航点重跑、定时计划。
 - **看护**：前置检查（在线/急停/ROS/定位新鲜/云端空闲/控制权）、掉线/停滞/外部任务/控制权 409/丢定位（停下等重定位）判定与记录、进程退出先停机器人。
 - **可观测**：云端 + 系统事件时间线（云端事件挂到执行/段）、按航点统计与人工改判、失败通知 webhook、CSV 导出、系统自检、文件日志。
-- **适配器**：VLM（mock / OpenAI 兼容 / Anthropic 官方 SDK）、TTS（edge-tts / 命令行 / 浏览器朗读）与汇出（浏览器 / 本机 / robot-audio ZMQ / webhook）、抓图源（RTSP / HLS / 合成 / 文件）。
+- **适配器**：VLM（mock / OpenAI 兼容 / Anthropic 官方 SDK）、TTS（edge-tts / 命令行 / 浏览器朗读）与汇出（浏览器 / 本机 / 自带 `audio_server` 播报服务 / webhook）、抓图源（RTSP / HLS / 合成 / 文件）。
 - **mock 云端网关**：按 Sample_web_api 文档契约仿真，含运动学与故障注入，整套测试都对着它跑。
 
 ## 跑起来
@@ -47,6 +47,7 @@ scripts/ui_screenshots.sh                # 无头 Chrome 截图每个视图并�
 ## 目录
 
 ```
+audio_server/   播报服务（扬声器端，纯标准库，部署到机器狗或现场 PC）
 app/            FastAPI 后端（api/ 路由，robot/ 云端连接与线程，executor/ 分段执行，media/ 全景与点云，vlm/ tts/ 适配器）
 app/vendor/     certaintyx.py —— Sample_web_api 仓库 a23fc40 的 SDK 原样拷贝，不改
 web/            原生 HTML/CSS/JS 前端（无构建）

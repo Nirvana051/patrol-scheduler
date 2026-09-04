@@ -1,5 +1,10 @@
 # 变更记录
 
+## [0.3.0] - 2026-09-04 14:20
+- 新增 `audio_server/`：纯标准库的播报服务（扬声器端），部署到机器狗或现场 PC；顺序队列、可选口令、dry 模式
+- TTS 汇出 `zmq`（依赖 pyzmq 与外部 robot-audio 服务）移除，改为 `http` 推送到 audio_server；新增 `TTS_AUDIO_SERVER_URL/TOKEN`
+- 真机只读冒烟与 RTSP/HLS 抓帧实测记录；`docs/TEST_PLAN.md` 全流程测试方案；96 用例
+
 ## [0.2.2] - 2026-09-04 04:53
 - TTS 合成加超时（`TTS_TIMEOUT`，默认 20 s）：通宵观察中 edge-tts 卡死过一条执行，现在超时记错误、文本仍推给浏览器、执行继续
 - 启动时把上次进程残留的「进行中」执行标记为中止（`runs_reconciled`）

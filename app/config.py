@@ -36,8 +36,9 @@ DEFAULTS: dict[str, str] = {
     'TTS_ENGINE': 'edge',             # edge | command | none
     'TTS_VOICE': 'zh-CN-XiaoxiaoNeural',
     'TTS_COMMAND': '',                # command 引擎：如 espeak-ng -v cmn -w {out} "{text}"
-    'TTS_SINKS': 'browser',           # browser,local,zmq,webhook
-    'TTS_ZMQ_ENDPOINT': 'tcp://192.168.41.2:5555',
+    'TTS_SINKS': 'browser',           # browser,local,http,webhook
+    'TTS_AUDIO_SERVER_URL': '',       # 本项目 audio_server 的地址，如 http://192.168.0.122:5566
+    'TTS_AUDIO_SERVER_TOKEN': '',
     'TTS_WEBHOOK_URL': '',
     'TTS_TIMEOUT': '20',              # 合成超时（秒）：外部服务卡住不能拖住执行
     # 抓图 / 全景
@@ -53,7 +54,7 @@ DEFAULTS: dict[str, str] = {
 
 # 网页「设置」里可改、存进 settings 表的键（密钥也允许改，但读出来一律掩码）
 RUNTIME_KEYS = [k for k in DEFAULTS if not k.startswith('PS_')]
-SECRET_KEYS = {'CX_KEY', 'VLM_API_KEY', 'ANTHROPIC_API_KEY'}
+SECRET_KEYS = {'CX_KEY', 'VLM_API_KEY', 'ANTHROPIC_API_KEY', 'TTS_AUDIO_SERVER_TOKEN'}
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:

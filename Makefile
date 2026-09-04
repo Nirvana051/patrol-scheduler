@@ -1,7 +1,7 @@
 # 常用命令。需要先建好 .venv（见 README）。
 PY := .venv/bin/python
 
-.PHONY: run mock test lint shots seed smoke clean-media lock backup eval
+.PHONY: run mock test lint shots seed smoke clean-media lock backup eval audio-server
 
 run:            ## 启动调度系统（读 config/.env）
 	$(PY) -m app.main
@@ -32,6 +32,9 @@ backup:         ## 在线备份 SQLite 到 data/backups（保留 14 份）
 
 eval:           ## 用人工复核过的检查评测当前 VLM
 	$(PY) scripts/eval_vlm.py
+
+audio-server:   ## 本机起一个播报服务（扬声器端）用于联调：http://127.0.0.1:5566
+	$(PY) -m audio_server --host 127.0.0.1 --port 5566
 
 lock:           ## 重新生成 requirements.lock
 	pip3 --python $(PY) freeze --local | grep -v -E '^(ruff|pip)=' > requirements.lock

@@ -14,7 +14,7 @@
 ## 2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
 |---|------|-----------|
-| T2 | 云端 API 没有机器狗扬声器端点 | 汇出插件化：browser / local / **zmq（对接用户已有 `tts_cmq_dev/robot-audio`，需机器人端加 `play_tts` 动作或改为传音频文件）** / webhook |
+| T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
 | T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |

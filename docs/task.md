@@ -75,7 +75,7 @@ FastAPI（scheduler/app，单进程多线程）
    ├─ media/pano          角度↔像素、跨缝裁切、标注
    ├─ media/pointcloud    PCD 读取 + 体素下采样（接口，后续接真机点云）
    ├─ vlm/*               MockVlm | OpenAICompatVlm（Qwen-VL/Ollama/vLLM/OpenAI）| AnthropicVlm（官方 SDK）
-   ├─ tts/*               EdgeTts | CommandTts | 汇出：浏览器 / 本机扬声器 / robot-audio ZMQ（用户已有服务）/ Webhook
+   ├─ tts/*               EdgeTts | CommandTts | 汇出：浏览器 / 本机扬声器 / 自带 audio_server（HTTP，机器狗端）/ Webhook
    └─ db                  SQLite（WAL），schema.sql 迁移
    │
    ▼  HTTPS（X-API-Key）
@@ -282,7 +282,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
 |---|------|-----------|
-| T2 | 云端 API 没有机器狗扬声器端点 | 汇出插件化：browser / local / **zmq（对接用户已有 `tts_cmq_dev/robot-audio`，需机器人端加 `play_tts` 动作或改为传音频文件）** / webhook |
+| T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
 | T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
@@ -321,7 +321,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 13. 通知：Webhook 已有（检查不通过 / 执行失败中止）；后续：IM 适配（企微/飞书/Slack 模板）、日报。
 
 **R5 与现场系统打通**
-14. 机器狗端播报：与 `robot-audio` ZMQ 服务对接 `play_tts`（T2）。
+14. 机器狗端播报：已改为本项目自带 `audio_server`（T2）；后续：播报音量/打断策略、多语言声音。
 15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；重建图后的任务航点迁移工具已有（导出/导入 + 按 x,y 重定向到新图最近航点），后续做 UI 引导与差异预览。
 16. 巡检模板库：常见点位（消防栓、通道、配电箱、指示牌）的 prompt/答案模版可复用。
 

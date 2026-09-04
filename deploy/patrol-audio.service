@@ -1,0 +1,17 @@
+# 播报服务（扬声器端）：部署到机器狗或现场 PC。只需 python3 + ffplay（apt install ffmpeg）。
+#   scp -r audio_server user@robot:~/patrol-audio/ ; sudo cp patrol-audio.service /etc/systemd/system/ ; sudo systemctl enable --now patrol-audio
+[Unit]
+Description=巡检播报服务（audio_server）
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+User=nvidia
+WorkingDirectory=/home/nvidia/patrol-audio
+ExecStart=/usr/bin/python3 -m audio_server --host 0.0.0.0 --port 5566 --token CHANGE_ME
+Restart=on-failure
+RestartSec=3
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+
+[Install]
+WantedBy=multi-user.target
