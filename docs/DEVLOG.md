@@ -193,3 +193,8 @@
 - C 顶栏停任务：这次 `DELETE /task` 后 1 s 云端就发 `task_stopped`、任务 IDLE，执行如实标「云端任务被外部停止」。结合 21:27 的探针（同样的 DELETE 机器人却一直走到终点），**T22 是间歇性的**：停止指令有时生效有时被机器人端忽略。核实逻辑（`stop_wait_seconds`）保留，核实不了就告警 + 通知。
 - D 现场中途下发别的任务：真实云端**不会**再发 `task_started`（状态一直是 navigating，没有跃迁），我们之前只靠 `task_started.path` 比对 → 漏判，外部任务的 `task_completed` 被当成本段到达（run #119 错标完成）。修法：每条 `waypoint_reached`/`task_completed` 用 `total`（云端任务航点数）与本段路径长度比对、`visited` 是否含本段终点；对账时比对云端 `path` 与本段路径。mock 对齐：替换进行中的任务时不再发 `task_started`。
 - 期间 `DELETE /task` 也有 `task_stopped` 事件正常到达，事件落库恢复（schema v6 后 `dropped=0`）。
+
+## 21:50 演练 D 复测通过、E 急停、恢复通宵计划
+- D：外部任务下发 3 秒后，云端到达事件带着别人的 `total=3`（本段 34），执行器立刻判「云端任务被外部替换」并中止、不去停对方的任务；对方任务自己跑完。**真实云端一个细节**：替换后的第一条到达事件 `index=3/total=3`（差分基线沿用了旧任务的 visited），所以不能靠 `index` 判断，只能靠 `total`/`visited`。
+- E：空闲时急停 → `emergency_active=true`、云端 `emergency` 事件到达；取消后恢复。
+- 22:00 起恢复每 10 分钟一趟的通宵计划。
