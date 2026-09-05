@@ -98,5 +98,6 @@ python3 ../Sample_web_api/examples/python/04_verify_flow.py --robot ntu-dog-0000
 | 一切正常但数据不变 | 总览「ROS 不可用」 | 机器人端 ROS 挂了，读到的都是陈旧值 |
 | 我的写操作 409 | 顶栏「控制权：xxx」 | 现场有人接管；等对方放手 |
 | 定位灯一直灰 | 总览定位卡片 | 未初始化；不要看 perception.Location |
+| 事件里偶见 `reconcile_failed … 502 Bad Gateway` | 任务事件 | 云端 nginx 层偶发 HTML 502，下一次对账即恢复；连续超过 `offline_timeout` 才判段失败 |
 
 日志：`data/logs/app.log`；事件：网页「任务事件」（云端事件只在内存留 500 条，这里才是持久记录）。
