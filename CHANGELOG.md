@@ -1,5 +1,14 @@
 # 变更记录
 
+## [0.4.0] - 2026-09-06 07:30（真机联调版）
+- 真机（Gazebo 经真实云端）跑通全流程；通宵每 10 分钟一趟四点巡检零失败
+- schema v6：云端事件唯一性按 (gateway, cloud_seq)——修复 mock→真机切换后真机事件静默丢失（T23）
+- 停任务后核实机器人真的停了（`stop_wait_seconds`），核实不了报 error + 通知，可选自动软件急停（`estop_if_stop_unconfirmed`）（T22）
+- 外部任务识别改为按事件 `total`/`visited` 与对账路径比对（真实云端中途替换任务不发 `task_started`，T24）
+- 透传通道 429 退避；HTML 版 502 错误文本清洗
+- mock 对齐真机：idle 无 progress、`nav_preprocess` 阶段、完成后回 idle、替换任务不发 task_started、nginx HTML 502 注入、`ignore_stop` 注入
+- `start.sh` 一键启停；`docs/TEST_PLAN.md`、`docs/HANDOFF.md`；真机全景样张；104 用例
+
 ## [0.3.0] - 2026-09-04 14:20
 - 新增 `audio_server/`：纯标准库的播报服务（扬声器端），部署到机器狗或现场 PC；顺序队列、可选口令、dry 模式
 - TTS 汇出 `zmq`（依赖 pyzmq 与外部 robot-audio 服务）移除，改为 `http` 推送到 audio_server；新增 `TTS_AUDIO_SERVER_URL/TOKEN`
