@@ -74,6 +74,8 @@ class MockRobot:
         self.html502_left = 0            # >0 时接下来 n 次机器人端请求返回 nginx 风格的 HTML 502
         self.html502_only_task = False   # True 时只对 GET /task 注入（测执行器对账）
         self.ignore_stop = False         # True 时 DELETE /task 回 200 但机器人继续走（真实 Gazebo 机器人实测如此）
+        self.completed_to_idle_seconds = 10.0   # 真机：COMPLETED 停留一会后自动回到 IDLE（path/message 保留）
+        self._completed_at = 0.0
         self.drop_events = False
         self.lease: dict | None = None
         self.device_tasks: dict[str, dict] = {}
@@ -445,6 +447,8 @@ class MockRobot:
         self._was_avoiding = avoiding
 
         t = self.task
+        if t['status_code'] == 4 and self.completed_to_idle_seconds > 0 and now - self._completed_at > self.completed_to_idle_seconds:
+            t['status_code'] = 0          # 真机实测：完成后过一会状态词回到 idle，path/message 保留
         if t['status_code'] == 2:
             if now >= self._preprocess_until:
                 t['status_code'] = 3
@@ -485,6 +489,8 @@ class MockRobot:
             if nxt is None:
                 t['status_code'] = 4
                 t['current_target'] = ''
+                t['message'] = f"巡检完成，共 {len(t['path'])} 个点"
+                self._completed_at = now
                 self.linear = 0.0
                 self.emit('task_completed', {'map': t['map_name'], 'visited': list(t['visited']),
                                              'total': len(t['path'])})
