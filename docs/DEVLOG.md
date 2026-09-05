@@ -207,3 +207,8 @@
 ## 23:17 通宵计划第一小时
 - 22:00 起 8 趟全部完成，每趟 242–245 s（四段导航 51.5 / 36.2 / 22.0 / 107.8 s，非常稳定）；32 次检查全部有图、无 VLM/TTS 错误，抓帧+判读+播报 3.0–3.6 s/点。
 - 云端事件 1233 条全部落库（`dropped=0`），事件流 SSE 一直连着；22:00 后零告警（21:18 那次 HTML 502 之后没再出现）；进程 94.6 MB。
+
+## 23:20 契约对照（真实云端 vs mock）
+- 用真实响应逐个端点比键：`/robots/{r}`、`/telemetry`（含 `telemetry.*`）、`/perception`、`/task` 的键集合与 mock 完全一致；真实 `/task` 的 `progress` 只在 `path` 非空时出现（完成后 path 仍保留，所以 idle 也可能带 progress）——mock 已按同一规则。
+- 真实事件 `waypoint_reached / task_started / task_completed / task_stopped / emergency` 的 data 键与 mock 一致（最后一点 `nextTarget: null`）。`localization` / `obstacle` 两类事件在 Gazebo 里没出现过。
+- 真机完成后状态词会从 `completed` 回到 `idle`（`message` 变「巡检完成，共 N 个点」）；mock 加了 10 s 后自动回 idle 的行为。
