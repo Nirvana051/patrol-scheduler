@@ -280,7 +280,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T8 | 分段下发间隙：每段结束 → 检查（3–15 s）→ 下一段起步，真机 `nav_preprocess` 耗时未知 | `not_started_timeout`（25 s）是否够 | 实测后调；执行记录里每段有下发/到达时刻可回看 |
 | T9 | 巡检途中丢定位 | 需人工重新定位 | 已做：默认策略「停下并暂停」，提示用当前最近航点重新定位后点继续，恢复后从当前位置重规划该段；真机验证提示时机与恢复流程 |
 
-| T22 | **机器人端不理会 `DELETE /task`**（09-05 Gazebo 实测：云端回 200「任务已停止」，机器人继续走到终点） | 「中止 / 跳过 / 停任务」并不能让机器人停下；只能靠急停或等它走完 | 已做：停任务后核实 `/task` 真的 terminal（`stop_wait_seconds`），核实不了记 error 事件 + 通知；mock 加 `ignore_stop` 复现。**真狗上必须重测**：若真狗同样不停，中止语义要改成「急停」并在手册里写明 |
+| T22 | **机器人端间歇性不理会 `DELETE /task`**（09-05 Gazebo 实测：21:27 一次云端回 200「任务已停止」但机器人走到终点；21:42 一次 1 s 内就 `task_stopped`） | 「中止 / 跳过 / 停任务」并不能让机器人停下；只能靠急停或等它走完 | 已做：停任务后核实 `/task` 真的 terminal（`stop_wait_seconds`），核实不了记 error 事件 + 通知；mock 加 `ignore_stop` 复现。**真狗上必须重测**：若真狗同样不停，中止语义要改成「急停」并在手册里写明 |
 
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
@@ -295,6 +295,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
 
 ### 9.3 已解决（留档）
+T24 真实云端在任务被中途替换时不发新的 `task_started`（状态无跃迁）→ 外部任务识别改为按事件 `total`/`visited` 与对账 `path` 比对（09-05 演练 D 抓到，run #119 曾误标完成）。
 T23 mock → 真机切换后真机云端事件静默丢失（唯一索引全局按 `cloud_seq`，与 mock 时期的行撞号）→ schema v6 按 (gateway, cloud_seq) 唯一，监听器暴露 `dropped` 计数。
 T21 edge-tts 合成无超时，通宵观察中真的卡死了一条执行（04:43 起 `inspecting` 不动，定时计划被跳过）→ 合成放到工作线程并带 `TTS_TIMEOUT`（默认 20 s），超时记错误、执行继续；启动时把上次进程残留的「进行中」执行标记为中止（`runs_reconciled`）。
 T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停对方任务）；T16 systemd 单元（`deploy/`）；T17 时间戳带时区偏移；T19 幂等诚实失败（409 后查 `GET /task`，路径一致即按已下发）；T20 控制权 409 等待/重试次数可配（任务选项）；幂等键跨库撞键（加实例段）；测试残留执行线程污染共享 mock（`RunManager.shutdown`）；`pkill -f` 误杀自身 shell（pid 文件）；无头 Chrome 遇 SSE 不结束（`?nosse=1`）；`item_seq` 被对账写入覆盖（独立列 + schema v2）；mock `preempt seconds=0` 被当缺省；控制权测试在前置检查被拦（改为途中抢占）。

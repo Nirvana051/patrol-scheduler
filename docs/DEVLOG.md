@@ -188,3 +188,8 @@
 - **T22 机器人端不理会停止指令**：演练「导航途中中止」——`DELETE /task` 返回 200 `{"message":"任务已停止"}`，但 Gazebo 机器人继续沿路径走，34 s 后任务自己 COMPLETED（每 1.5 s 采样 `/task` 全程 NAVIGATING）。云端只是转发机器人端的回应。后果：我们把执行标成「已中止」时机器人其实还在动；紧接着的下一次执行前置检查也因「云端有任务在跑」被拦。修法：停任务后核实 `/task` 是否真的 terminal（`stop_wait_seconds`，默认 15 s），核实不了就记 **error 事件 + 通知**，界面提示到现场确认或急停；mock 加 `ignore_stop` 注入复现。真狗是否也如此，待真机验证。
 - **T23 真机云端事件静默丢失**：切到真机后 `events` 表里 21:17 之后一条云端事件都没有——唯一索引是全局 `cloud_seq`，mock 时期已存了 seq 21…3452，真机网关（刚重启过，seq 从 2 开始）的事件全部撞号被 `IntegrityError` 吞掉；执行器靠内存队列没受影响，所以没人发现。修法：schema v6 加 `events.gateway`（host|alias），唯一性按 (gateway, cloud_seq)，老行标 `legacy`；监听器暴露 `dropped` 计数（应恒为 0）。
 - 云端网关本身在 21:00 前后重启过一次（seq 2252 → 2），我们的游标重置逻辑生效了。
+
+## 21:40–21:50 演练 C/D 重做（目标改为远端，避免「已在目标点」）
+- C 顶栏停任务：这次 `DELETE /task` 后 1 s 云端就发 `task_stopped`、任务 IDLE，执行如实标「云端任务被外部停止」。结合 21:27 的探针（同样的 DELETE 机器人却一直走到终点），**T22 是间歇性的**：停止指令有时生效有时被机器人端忽略。核实逻辑（`stop_wait_seconds`）保留，核实不了就告警 + 通知。
+- D 现场中途下发别的任务：真实云端**不会**再发 `task_started`（状态一直是 navigating，没有跃迁），我们之前只靠 `task_started.path` 比对 → 漏判，外部任务的 `task_completed` 被当成本段到达（run #119 错标完成）。修法：每条 `waypoint_reached`/`task_completed` 用 `total`（云端任务航点数）与本段路径长度比对、`visited` 是否含本段终点；对账时比对云端 `path` 与本段路径。mock 对齐：替换进行中的任务时不再发 `task_started`。
+- 期间 `DELETE /task` 也有 `task_stopped` 事件正常到达，事件落库恢复（schema v6 后 `dropped=0`）。
