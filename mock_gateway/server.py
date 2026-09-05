@@ -68,6 +68,7 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     keys = {api_key: {'id': api_key.split('_')[1] if '_' in api_key else 'mock', 'role': 'operator', 'lease': 'auto'},
             viewer_key: {'id': 'view', 'role': 'viewer', 'lease': 'none'}}
     buckets: dict[str, TokenBucket] = {}
+    app.state.buckets = buckets
     idem: dict[tuple, tuple[float, int, Any]] = {}
     idem_lock = threading.Lock()
     v1_index = json.loads((FIXTURES / 'v1_index.json').read_text(encoding='utf-8'))

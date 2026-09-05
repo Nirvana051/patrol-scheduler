@@ -164,3 +164,8 @@
 ## 14:20 播报服务自带化（去掉 tts_cmq_dev / pyzmq 依赖）
 - 新增 `audio_server/`：纯标准库 HTTP 服务（`/health` `/play-audio` `/play` `/stop`，可选口令），单队列顺序播放、临时文件播完即删；播放器自动挑 ffplay/mpg123/paplay/aplay，测试用 dry 模式。
 - 调度系统 `zmq` 汇出移除，改为 `http` 汇出：有音频就推字节（机器人端无需联网/无需 TTS），只有文本就让对方合成（对方没引擎则如实 501）。设置项 `TTS_AUDIO_SERVER_URL/TOKEN`；systemd 单元 `deploy/patrol-audio.service`；`make audio-server`。
+
+## 09-05 20:30 机器人端已上线；config/.env 被覆盖
+- 再跑只读冒烟先得到 401：`config/.env` 在 09-04 15:53 被改回了 `env.example` 的占位密钥（大概是又拷了一次模板）。恢复真实密钥后 18/19 通过：机器人端本地服务已上线，`/position` 200（x=8.87 y=-0.23）、两张地图（`map_20260818_132055` 87 点）、任务 idle、事件 seq=2252。
+- 唯一「不符」是 idle 时真实网关不带 `progress` 字段——冒烟脚本放宽，mock 也改成 idle 不带 progress（回填差异）。
+- 上游 `examples/curl/env.sh` 现在直接 source 调度系统的 `config/.env`，密钥只维护一处。

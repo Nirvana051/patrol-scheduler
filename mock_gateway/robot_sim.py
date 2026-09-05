@@ -203,7 +203,7 @@ class MockRobot:
                 'status_code': code, 'status_name': sv['name'], 'status_text': sv['zh'],
                 'active': code in self.active_codes, 'terminal': code in self.terminal_codes,
                 'error_name': ev['name'], 'error_text': ev['zh'], 'error_hex': f"0x{t['error_code']:04X}",
-                'progress': {'visited': len(t['visited']), 'total': len(t['path'])},
+                **({'progress': {'visited': len(t['visited']), 'total': len(t['path'])}} if t['path'] else {}),   # 真实网关 idle 时不带 progress
                 'gait_name': cname('gait', t['gait']), 'speed_name': cname('speed', t['speed']),
                 'manner_name': cname('manner', t['manner']), 'nav_mode_name': cname('navMode', t['nav_mode']),
                 'obs_mode_name': cname('obsMode', t['obs_mode']),

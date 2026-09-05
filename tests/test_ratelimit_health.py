@@ -45,3 +45,17 @@ def test_db_backup_script(app_client, tmp_path):
     c = sqlite3.connect(p2)
     assert c.execute('SELECT MAX(version) FROM schema_version').fetchone()[0] >= 4
     assert c.execute("SELECT value FROM settings WHERE key='PS_INSTANCE_ID'").fetchone()[0] == app_client.ctx.instance_id
+
+
+def test_gateway_retries_passthrough_on_429(mock_gw, mock_robot):
+    """透传通道遇 429 时包装层退避重试，而不是直接把 429 抛给调用方。"""
+    from app.robot.client import RobotGateway
+    from mock_gateway.server import TokenBucket
+    g = RobotGateway(mock_gw.url, mock_gw.alias, mock_gw.key, rps=50)
+    g.info()
+    # 把 mock 里这把密钥的令牌桶掏空，下一次请求必然 429，1 s 后回填
+    app = mock_gw.server.config.app
+    b = app.state.buckets[mock_gw.key]
+    b.tokens = 0.0
+    tid = g.device_start()                      # 第一次 429 → 退避 → 成功
+    assert tid and isinstance(b, TokenBucket)

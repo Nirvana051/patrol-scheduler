@@ -109,7 +109,7 @@ def main() -> int:
     try:
         t = g.task()
         ok('active' in t and 'terminal' in t and 'status_name' in t, f"云端附带 active/terminal/status_name：{t.get('status')} → {t.get('status_name')} active={t.get('active')}")
-        ok('error_hex' in t and 'progress' in t, f"error_hex={t.get('error_hex')} progress={t.get('progress')}")
+        ok('error_hex' in t, f"error_hex={t.get('error_hex')} progress={t.get('progress')}（idle 时真实网关不带 progress，属正常）")
     except RobotError as e:
         ok(False, 'GET /task', str(e))
 

@@ -60,8 +60,21 @@ class RobotGateway:
             return attr
 
         def wrapped(*a, **kw):
-            self.limiter.acquire()
-            return attr(*a, **kw)
+            # SDK 的 /v1 请求自带 429 退避，透传通道（device/localize 等）没有；这里统一兜一层：429 按 Retry-After 退避后再试一次
+            for attempt in range(3):
+                self.limiter.acquire()
+                try:
+                    return attr(*a, **kw)
+                except RobotError as e:
+                    if e.status != 429 or attempt == 2:
+                        raise
+                    wait = 1.0
+                    body = e.body if isinstance(e.body, dict) else {}
+                    try:
+                        wait = float(body.get('retry_after') or 1.0)
+                    except (TypeError, ValueError):
+                        pass
+                    time.sleep(min(wait, 5.0) * (attempt + 1))
         wrapped.__name__ = name
         return wrapped
 
