@@ -114,6 +114,9 @@ def test_schema_migration_from_v1(tmp_path):
                     'CREATE TABLE run_legs(id INTEGER PRIMARY KEY, run_id INTEGER, seq INTEGER, status TEXT);'
                     'CREATE TABLE inspections(id INTEGER PRIMARY KEY, run_id INTEGER, answer TEXT, passed INTEGER, created_at TEXT);'
                     'CREATE TABLE tasks(id INTEGER PRIMARY KEY, name TEXT);'
+                    'CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, source TEXT NOT NULL, type TEXT NOT NULL, cloud_seq INTEGER, run_id INTEGER, leg_id INTEGER, level TEXT NOT NULL DEFAULT \'info\', message TEXT NOT NULL DEFAULT \'\', data TEXT NOT NULL DEFAULT \'{}\');'
+                    'CREATE UNIQUE INDEX events_cloud_seq ON events(cloud_seq) WHERE cloud_seq IS NOT NULL;'
+                    'INSERT INTO events(ts,source,type,cloud_seq) VALUES(\'t\',\'cloud\',\'a\',7);'
                     'CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);')
     c.commit(); c.close()
     db = Database(p)
@@ -123,6 +126,8 @@ def test_schema_migration_from_v1(tmp_path):
     assert db.query_one("SELECT name FROM sqlite_master WHERE type='table' AND name='schedules'")
     cols_i = {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
     assert 'human_passed' in cols_i and 'capture_pose' in cols_i
+    assert 'gateway' in {r['name'] for r in db.query('PRAGMA table_info(events)')}
+    assert db.query_one('SELECT gateway FROM events WHERE cloud_seq=7')['gateway'] == 'legacy'
     db2 = Database(tmp_path / 'fresh.db')
     assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}
 
@@ -203,3 +208,36 @@ def test_stale_runs_marked_aborted_on_startup(make_client):
     legs = c.get(f"/api/runs/{runs['残留']['id']}").json()['legs']
     assert legs[0]['status'] == 'aborted' and legs[0]['ended_at']
     assert c.get('/api/events?type=runs_reconciled').json()['items']
+
+
+def test_cloud_event_seq_unique_per_gateway(tmp_path):
+    """mock → 真机切换后 seq 会撞号：同一 cloud_seq 来自不同网关必须都能落库；同一网关重复才去重。"""
+    from app.db import Database
+    db = Database(tmp_path / 'g.db')
+    assert db.add_event('cloud', 'x', cloud_seq=100, gateway='http://127.0.0.1:18443|ntu-dog-00001') is not None
+    assert db.add_event('cloud', 'x', cloud_seq=100, gateway='https://certaintyx.sg:8443|ntu-dog-00001') is not None
+    assert db.add_event('cloud', 'x', cloud_seq=100, gateway='https://certaintyx.sg:8443|ntu-dog-00001') is None
+    assert db.query_one("SELECT COUNT(*) AS n FROM events WHERE cloud_seq=100")['n'] == 2
+
+
+def test_migration_v5_to_v6_marks_legacy_rows(tmp_path):
+    import sqlite3
+    from app.db import SCHEMA_VERSION, Database
+    p = tmp_path / 'v5.db'
+    c = sqlite3.connect(p)
+    c.executescript("""
+    CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(5);
+    CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, source TEXT NOT NULL, type TEXT NOT NULL, cloud_seq INTEGER,
+      run_id INTEGER, leg_id INTEGER, level TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}');
+    CREATE UNIQUE INDEX events_cloud_seq ON events(cloud_seq) WHERE cloud_seq IS NOT NULL;
+    INSERT INTO events(ts,source,type,cloud_seq) VALUES('t','cloud','a',5);
+    CREATE TABLE inspections(id INTEGER PRIMARY KEY, human_passed INTEGER, capture_pose TEXT);
+    CREATE TABLE run_legs(id INTEGER PRIMARY KEY, item_seq INTEGER);
+    CREATE TABLE schedules(id INTEGER PRIMARY KEY);
+    CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+    """)
+    c.commit(); c.close()
+    db = Database(p)
+    assert db.version() == SCHEMA_VERSION
+    assert db.query_one("SELECT gateway FROM events WHERE cloud_seq=5")['gateway'] == 'legacy'
+    assert db.add_event('cloud', 'a', cloud_seq=5, gateway='real|dog') is not None      # 老行不再挡住真机同号事件

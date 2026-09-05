@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def now_iso() -> str:
@@ -114,6 +114,13 @@ class Database:
         if v < 5:
             c.execute('ALTER TABLE inspections ADD COLUMN capture_pose TEXT')
             c.execute('INSERT INTO schema_version(version) VALUES (5)')
+        if v < 6:
+            # 云端事件 seq 只在同一网关内唯一：mock → 真机切换后同一张表里会撞号，导致真机事件静默丢失（09-05 实测踩到）
+            c.execute('DROP INDEX IF EXISTS events_cloud_seq')
+            c.execute('ALTER TABLE events ADD COLUMN gateway TEXT')
+            c.execute("UPDATE events SET gateway='legacy' WHERE cloud_seq IS NOT NULL")
+            c.execute('CREATE UNIQUE INDEX IF NOT EXISTS events_gw_seq ON events(gateway, cloud_seq) WHERE cloud_seq IS NOT NULL')
+            c.execute('INSERT INTO schema_version(version) VALUES (6)')
 
     def version(self) -> int:
         row = self.conn().execute('SELECT MAX(version) AS v FROM schema_version').fetchone()
@@ -135,11 +142,12 @@ class Database:
     # ── 事件 ────────────────────────────────────────────────────────────────
     def add_event(self, source: str, etype: str, *, message: str = '', data: Any = None,
                   level: str = 'info', cloud_seq: int | None = None, run_id: int | None = None,
-                  leg_id: int | None = None, ts: str | None = None) -> int | None:
-        """写一条事件。云端事件按 cloud_seq 去重（重连补漏时会重复收到）。返回 id；重复返回 None。"""
+                  leg_id: int | None = None, ts: str | None = None, gateway: str | None = None) -> int | None:
+        """写一条事件。云端事件按 (gateway, cloud_seq) 去重（重连补漏时会重复收到）。返回 id；重复返回 None。"""
         try:
             return self.execute(
-                'INSERT INTO events(ts,source,type,cloud_seq,run_id,leg_id,level,message,data) VALUES(?,?,?,?,?,?,?,?,?)',
-                (ts or now_iso(), source, etype, cloud_seq, run_id, leg_id, level, message, dumps(data or {})))
+                'INSERT INTO events(ts,source,type,cloud_seq,run_id,leg_id,level,message,data,gateway) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (ts or now_iso(), source, etype, cloud_seq, run_id, leg_id, level, message, dumps(data or {}),
+                 gateway if cloud_seq is not None else None))
         except sqlite3.IntegrityError:
             return None

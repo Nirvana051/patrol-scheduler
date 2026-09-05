@@ -205,3 +205,38 @@ def test_gateway_html_502_during_leg_is_tolerated(app_client, mock_robot):
         mock_robot.speed = 10.0
         mock_robot.html502_left = 0
         mock_robot.html502_only_task = False
+
+
+def test_abort_confirms_cloud_task_stopped(app_client, mock_robot):
+    init_robot(app_client, '1')
+    mock_robot.speed = 1.0
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        app_client.post(f'/api/runs/{run_id}/abort')
+        run = wait_run(app_client, run_id, timeout=40)
+        assert run['status'] == 'aborted'
+        assert any(e['type'] == 'task_stop_confirmed' for e in run['events'])
+    finally:
+        mock_robot.speed = 10.0
+
+
+def test_abort_when_robot_ignores_stop_raises_alarm(app_client, mock_robot):
+    """机器人端对 DELETE /task 回 200 却不停（Gazebo 实测）：中止后要记 error 事件提醒现场，而不是假装停了。"""
+    init_robot(app_client, '1')
+    mock_robot.speed = 0.6
+    mock_robot.ignore_stop = True
+    try:
+        tid = make_task(app_client, nodes=('20',), stop_wait_seconds=4)
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        app_client.post(f'/api/runs/{run_id}/abort')
+        run = wait_run(app_client, run_id, timeout=60)
+        assert run['status'] == 'aborted'
+        assert any(e['type'] == 'task_stop_unconfirmed' and e['level'] == 'error' for e in run['events'])
+        assert mock_robot.snapshot_state()['task']['active'] is True                 # 机器人确实还在走
+    finally:
+        mock_robot.ignore_stop = False
+        mock_robot.task = mock_robot._idle_task()
+        mock_robot.speed = 10.0

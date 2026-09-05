@@ -15,7 +15,7 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'max_retries': 1,
+DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'stop_wait_seconds': 15.0, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False,
                    'lost_localization_action': 'pause'}   # continue | pause | fail
@@ -153,11 +153,29 @@ class MissionRunner(threading.Thread):
         if status != 'completed':
             self.ctx.notify('run_' + status, {'run_id': self.run_id, 'task': self.task.get('name'), 'error': error, 'summary': summary})
 
-    def _safe_stop_task(self) -> None:
+    def _safe_stop_task(self) -> bool:
+        """DELETE /task 并核实云端任务确实进入 terminal。真实机器人端可能回 200「任务已停止」却继续走（09-05 Gazebo 实测），
+        所以不能只信响应：最多等 stop_wait_seconds，仍 active 就记 error 事件——此时机器人还在动，界面上要人盯着。"""
         try:
             self.ctx.gateway.stop_task()
         except RobotError as e:
             self._log('task_stop_failed', f'停止云端任务失败：{e}', level='warn')
+            return False
+        wait_s = float(self.opt.get('stop_wait_seconds') or 15)
+        t0 = time.time()
+        while time.time() - t0 < wait_s:
+            time.sleep(1.5)
+            try:
+                st = self.ctx.gateway.task()
+            except RobotError:
+                continue
+            if not st.get('active'):
+                self._log('task_stop_confirmed', f'云端任务已停止（{time.time() - t0:.1f} s 后 {st.get("status_name")}）')
+                return True
+        self._log('task_stop_unconfirmed', f'已发 DELETE /task 但 {wait_s:.0f} s 后云端任务仍在进行（机器人端未响应停止指令）——机器人可能还在走，请到现场确认或急停',
+                  level='error')
+        self.ctx.notify('task_stop_unconfirmed', {'run_id': self.run_id, 'task': self.task.get('name')})
+        return False
 
     # ── 前置检查 / 规划 ─────────────────────────────────────────────────────
     def _preflight(self) -> None:

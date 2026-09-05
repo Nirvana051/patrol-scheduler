@@ -69,6 +69,7 @@ class CloudEventListener(threading.Thread):
         self.transport = 'sse'
         self.last_error: str | None = None
         self.received = 0
+        self.dropped = 0                 # 落库被唯一索引拒绝的条数（应恒为 0；>0 说明又撞号了）
         self._subs: list[queue.Queue] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -91,7 +92,7 @@ class CloudEventListener(threading.Thread):
 
     def state(self) -> dict:
         return {'connected': self.connected, 'transport': self.transport, 'cursor': self.cursor,
-                'received': self.received, 'last_error': self.last_error}
+                'received': self.received, 'dropped': self.dropped, 'last_error': self.last_error}
 
     # ── 主循环 ───────────────────────────────────────────────────────────────
     def run(self) -> None:
@@ -201,7 +202,10 @@ class CloudEventListener(threading.Thread):
             except Exception:      # noqa: BLE001
                 pass
         row_id = self.db.add_event('cloud', ev.get('type', '?'), cloud_seq=seq, data=ev.get('data') or {},
-                                   message=describe(ev), level=level_of(ev), ts=ts, run_id=run_id, leg_id=leg_id)
+                                   message=describe(ev), level=level_of(ev), ts=ts, run_id=run_id, leg_id=leg_id,
+                                   gateway=f'{self.gateway.host}|{self.gateway.robot}')
+        if row_id is None:
+            self.dropped += 1
         row = {'id': row_id, 'ts': ts, 'source': 'cloud', 'type': ev.get('type'), 'cloud_seq': seq,
                'level': level_of(ev), 'message': describe(ev), 'data': ev.get('data') or {}, 'run_id': run_id, 'leg_id': leg_id}
         self.bus.publish('event', row)

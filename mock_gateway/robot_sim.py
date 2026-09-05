@@ -73,6 +73,7 @@ class MockRobot:
         self.fault_next_leg: str | None = None
         self.html502_left = 0            # >0 时接下来 n 次机器人端请求返回 nginx 风格的 HTML 502
         self.html502_only_task = False   # True 时只对 GET /task 注入（测执行器对账）
+        self.ignore_stop = False         # True 时 DELETE /task 回 200 但机器人继续走（真实 Gazebo 机器人实测如此）
         self.drop_events = False
         self.lease: dict | None = None
         self.device_tasks: dict[str, dict] = {}
@@ -240,6 +241,8 @@ class MockRobot:
 
     def stop_task(self) -> dict:
         with self.lock:
+            if self.ignore_stop:
+                return {'message': '任务已停止'}          # 云端如实转发机器人端的回应，但机器人并没有停
             was_active = self.task['status_code'] in self.active_codes
             m = self.task['map_name']
             self.task['status_code'] = 0
@@ -396,6 +399,7 @@ class MockRobot:
             self.fault_next_leg = None
             self.html502_left = 0
             self.html502_only_task = False
+            self.ignore_stop = False
             self.drop_events = False
             self.lease = None
             self.linear = 0.0

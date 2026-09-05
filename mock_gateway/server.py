@@ -407,6 +407,10 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     @app.post('/mock/fault')
     async def mock_fault(request: Request):
         b = await body_json(request)
+        if b.get('kind') == 'ignore_stop':
+            with robot.lock:
+                robot.ignore_stop = bool(b.get('on', True))
+            return {'ok': True, 'ignore_stop': robot.ignore_stop}
         if b.get('kind') == 'html502':
             with robot.lock:
                 robot.html502_left = int(b.get('count') or 1)

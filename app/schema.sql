@@ -1,4 +1,4 @@
--- 巡检调度系统 SQLite 模式 v5（见 docs/task.md §4；增量迁移见 app/db.py）
+-- 巡检调度系统 SQLite 模式 v6（见 docs/task.md §4；增量迁移见 app/db.py）
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -129,9 +129,10 @@ CREATE TABLE IF NOT EXISTS events (
   leg_id    INTEGER,
   level     TEXT NOT NULL DEFAULT 'info',       -- info|warn|error
   message   TEXT NOT NULL DEFAULT '',
-  data      TEXT NOT NULL DEFAULT '{}'
+  data      TEXT NOT NULL DEFAULT '{}',
+  gateway   TEXT                                -- 云端事件来自哪个网关/机器人（host|alias）；seq 只在同一网关内唯一（v6）
 );
-CREATE UNIQUE INDEX IF NOT EXISTS events_cloud_seq ON events(cloud_seq) WHERE cloud_seq IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS events_gw_seq ON events(gateway, cloud_seq) WHERE cloud_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id);
 CREATE INDEX IF NOT EXISTS inspections_run ON inspections(run_id);
 CREATE INDEX IF NOT EXISTS run_legs_run ON run_legs(run_id);
