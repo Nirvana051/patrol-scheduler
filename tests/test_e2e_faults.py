@@ -185,3 +185,23 @@ def test_lost_localization_pauses_until_relocalized(app_client, mock_robot):
         assert run['legs'][0]['from_node'] == near and run['legs'][0]['path'][0] == near   # 从重新定位时的最近航点重规划
     finally:
         mock_robot.speed = 10.0
+
+
+def test_gateway_html_502_during_leg_is_tolerated(app_client, mock_robot):
+    """真实网关偶发 nginx 层 HTML 502：对账失败只记 warn（且不把 HTML 写进事件），下一次对账正常，段照常到达。"""
+    init_robot(app_client, '1')
+    mock_robot.speed = 2.0
+    try:
+        tid = make_task(app_client, nodes=('20',))
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        mock_robot.html502_only_task = True                  # 只让 GET /task 回 HTML 502：状态轮询每秒一次 + 执行器 5 s 一次对账
+        mock_robot.html502_left = 30
+        run = wait_run(app_client, run_id, timeout=90)
+        assert run['status'] == 'completed'
+        msgs = [e['message'] for e in run['events'] if e['type'] == 'reconcile_failed']
+        assert msgs and all('<' not in m for m in msgs) and any('502' in m for m in msgs)
+    finally:
+        mock_robot.speed = 10.0
+        mock_robot.html502_left = 0
+        mock_robot.html502_only_task = False

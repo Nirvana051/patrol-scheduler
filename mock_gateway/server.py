@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from .robot_sim import MockRobot, load_maps
 
@@ -92,8 +92,18 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     def resolve_robot(name: str) -> bool:
         return name in (robot.alias, robot.robot_id)
 
-    def need_online() -> JSONResponse | None:
-        return None if robot.online else fail(502, '机器人不在线')
+    HTML_502 = '<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n'
+
+    def html_502(is_task: bool = False) -> HTMLResponse | None:
+        """真实网关偶发：nginx 层直接回整页 HTML 的 502，不是 JSON 信封。"""
+        with robot.lock:
+            if robot.html502_left > 0 and (is_task or not robot.html502_only_task):
+                robot.html502_left -= 1
+                return HTMLResponse(HTML_502, status_code=502)
+        return None
+
+    def need_online(is_task: bool = False) -> JSONResponse | None:
+        return html_502(is_task) or (None if robot.online else fail(502, '机器人不在线'))
 
     def write_guard(request: Request, info: dict, *, need_lease: bool = True) -> JSONResponse | None:
         if info['role'] != 'operator':
@@ -226,7 +236,7 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
             return err
         if not resolve_robot(name):
             return fail(404, '机器人不存在')
-        return need_online() or ok(robot.task_view())
+        return need_online(is_task=True) or ok(robot.task_view())
 
     @app.post('/v1/robots/{name}/task')
     async def task_post(name: str, request: Request):
@@ -397,6 +407,11 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     @app.post('/mock/fault')
     async def mock_fault(request: Request):
         b = await body_json(request)
+        if b.get('kind') == 'html502':
+            with robot.lock:
+                robot.html502_left = int(b.get('count') or 1)
+                robot.html502_only_task = bool(b.get('only_task', False))
+            return {'ok': True, 'html502_left': robot.html502_left, 'only_task': robot.html502_only_task}
         robot.inject_fault(b.get('kind'))
         return {'ok': True, 'fault_next_leg': robot.fault_next_leg}
 

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any
@@ -14,6 +15,15 @@ from typing import Any
 from app.vendor.certaintyx import ACTIVE_STATUS, TERMINAL_STATUS, RobotClient, RobotError  # noqa: F401
 
 __all__ = ['RobotGateway', 'RobotError', 'RateLimiter', 'ACTIVE_STATUS', 'TERMINAL_STATUS']
+
+
+def clean_error_text(text: str, limit: int = 200) -> str:
+    """真实网关偶尔在 nginx 层返回整页 HTML 的 502：去掉标签、压掉空白、截断，别把一页 HTML 写进事件。"""
+    t = str(text or '')
+    if '<' in t and '>' in t:
+        t = re.sub(r'<[^>]+>', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t[:limit] + ('…' if len(t) > limit else '')
 
 
 class RateLimiter:
@@ -67,6 +77,8 @@ class RobotGateway:
                     return attr(*a, **kw)
                 except RobotError as e:
                     if e.status != 429 or attempt == 2:
+                        if '<' in str(e) and '>' in str(e):
+                            raise RobotError(clean_error_text(str(e)), e.status, e.body) from e
                         raise
                     wait = 1.0
                     body = e.body if isinstance(e.body, dict) else {}

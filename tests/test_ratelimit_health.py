@@ -59,3 +59,11 @@ def test_gateway_retries_passthrough_on_429(mock_gw, mock_robot):
     b.tokens = 0.0
     tid = g.device_start()                      # 第一次 429 → 退避 → 成功
     assert tid and isinstance(b, TokenBucket)
+
+
+def test_clean_error_text_strips_html():
+    from app.robot.client import clean_error_text
+    html = 'GET /task 失败 [502]: <html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>'
+    out = clean_error_text(html)
+    assert '<' not in out and '502 Bad Gateway' in out and len(out) <= 201
+    assert clean_error_text('普通文本') == '普通文本'

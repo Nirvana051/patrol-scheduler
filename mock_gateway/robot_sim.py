@@ -71,6 +71,8 @@ class MockRobot:
         self.loc_lost_until = 0.0
         self.avoiding_until = 0.0
         self.fault_next_leg: str | None = None
+        self.html502_left = 0            # >0 时接下来 n 次机器人端请求返回 nginx 风格的 HTML 502
+        self.html502_only_task = False   # True 时只对 GET /task 注入（测执行器对账）
         self.drop_events = False
         self.lease: dict | None = None
         self.device_tasks: dict[str, dict] = {}
@@ -392,6 +394,8 @@ class MockRobot:
             self.loc_lost_until = 0.0
             self.avoiding_until = 0.0
             self.fault_next_leg = None
+            self.html502_left = 0
+            self.html502_only_task = False
             self.drop_events = False
             self.lease = None
             self.linear = 0.0
