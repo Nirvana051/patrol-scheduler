@@ -368,6 +368,8 @@ class MissionRunner(threading.Thread):
         offline_since: float | None = None
         stall_timeout = float(self.opt.get('stall_timeout') or 180)
         last_progress = t0
+        my_path = [str(x) for x in loads(leg.get('path'), [])]
+        my_len = len(my_path)
         try:
             while True:
                 if self.abort_req.is_set():
@@ -381,6 +383,11 @@ class MissionRunner(threading.Thread):
                 if ev is not None and int(ev.get('seq') or 0) > cursor:
                     t, d = ev.get('type'), ev.get('data') or {}
                     if t == 'waypoint_reached':
+                        # 真实云端在任务被中途替换时不会再发 task_started（状态一直是 navigating）：
+                        # 用事件里的 total（云端任务的航点数）和本段路径长度比对，不一致就是别人的任务
+                        if my_len and d.get('total') is not None and int(d.get('total')) != my_len:
+                            self._log('external_task', f"云端到达事件属于另一个任务（共 {d.get('total')} 点，本段 {my_len} 点）—— 现场有人下发了任务？", level='error', leg_id=leg['id'])
+                            return 'external'
                         progress = True
                         last_progress = time.time()
                         prog = {'last_reached': d.get('waypoint'), 'index': d.get('index'), 'total': d.get('total'), 'next': d.get('nextTarget')}
@@ -392,12 +399,16 @@ class MissionRunner(threading.Thread):
                             return 'arrived'
                     elif t == 'task_started':
                         ev_path = [str(x) for x in (d.get('path') or [])]
-                        if ev_path and ev_path != [str(x) for x in loads(leg.get('path'), [])]:
+                        if ev_path and ev_path != my_path:
                             self._log('external_task', f"云端开始了另一个任务（路径 {' → '.join(ev_path)}），不是本段的 —— 现场有人下发了任务？", level='error', leg_id=leg['id'])
                             return 'external'
                         progress = True
                         self._set_leg(leg, status='navigating')
                     elif t == 'task_completed':
+                        visited = [str(v) for v in (d.get('visited') or [])]
+                        if (my_len and d.get('total') is not None and int(d.get('total')) != my_len) or (visited and str(target) not in visited):
+                            self._log('external_task', f"云端完成的是另一个任务（共 {d.get('total')} 点，终点 {visited[-1] if visited else '?'}），不是本段", level='error', leg_id=leg['id'])
+                            return 'external'
                         return 'arrived'
                     elif t == 'task_failed':
                         return f"failed:{d.get('errorHex')}"
@@ -430,9 +441,16 @@ class MissionRunner(threading.Thread):
                     if st:
                         self._set_leg(leg, cloud_task=dumps({k: st.get(k) for k in ('status', 'status_code', 'status_name', 'active',
                                                                                    'terminal', 'error_hex', 'error_name', 'current_target', 'visited')}))
+                        st_path = [str(x) for x in (st.get('path') or [])]
                         if st.get('active'):
+                            if my_path and st_path and st_path != my_path:
+                                self._log('external_task', f"云端正在跑的任务路径与本段不同（{len(st_path)} 点 vs {my_len} 点）—— 现场有人下发了任务？", level='error', leg_id=leg['id'])
+                                return 'external'
                             progress = True
                         elif st.get('terminal'):
+                            if st_path and my_path and st_path != my_path and st.get('status_code') == 4:
+                                self._log('external_task', f"云端完成的任务路径与本段不同（{len(st_path)} 点 vs {my_len} 点），不是本段", level='error', leg_id=leg['id'])
+                                return 'external'
                             code = st.get('status_code')
                             if code == 4 and str(target) in [str(v) for v in (st.get('visited') or [])]:
                                 return 'arrived'

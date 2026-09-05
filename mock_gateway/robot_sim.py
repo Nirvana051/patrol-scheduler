@@ -217,6 +217,7 @@ class MockRobot:
     def start_task(self, map_name: str, path: list[str], opts: dict) -> dict:
         with self.lock:
             wps = self.maps[map_name]
+            was_active = self.task['status_code'] in self.active_codes
             self.task = self._idle_task()
             self.task.update({'map_name': map_name, 'path': list(path), 'checkpoint_id': opts.get('checkpoint_id') or path[-1]})
             for k in ('gait', 'speed', 'manner', 'nav_mode', 'obs_mode'):
@@ -235,7 +236,8 @@ class MockRobot:
             self.task['current_target'] = path[1]
             self.emit('waypoint_reached', {'waypoint': path[0], 'map': map_name, 'index': 0,
                                            'total': len(path), 'nextTarget': path[1]})
-            self.emit('task_started', {'map': map_name, 'path': list(path), 'statusCode': 3})
+            if not was_active:          # 真实云端按状态跃迁发事件：中途替换任务时没有 idle→navigating，不会再发 task_started
+                self.emit('task_started', {'map': map_name, 'path': list(path), 'statusCode': 3})
             _ = wps
             return {'accepted': True, 'map_name': map_name, 'path': list(path)}
 
