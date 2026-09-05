@@ -18,6 +18,8 @@
 
 ## 跑起来
 
+一键：`./start.sh`（真机，按 `config/.env`）/ `./start.sh --mock`（仿真）/ `--audio` 同时起本机播报服务 / `--status` / `--stop`。后台运行，日志在 `data/logs/`。手动方式如下：
+
 ```bash
 python3 -m venv --without-pip --system-site-packages .venv
 pip3 --python .venv/bin/python install -r requirements.txt
