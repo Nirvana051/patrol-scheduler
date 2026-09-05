@@ -212,3 +212,7 @@
 - 用真实响应逐个端点比键：`/robots/{r}`、`/telemetry`（含 `telemetry.*`）、`/perception`、`/task` 的键集合与 mock 完全一致；真实 `/task` 的 `progress` 只在 `path` 非空时出现（完成后 path 仍保留，所以 idle 也可能带 progress）——mock 已按同一规则。
 - 真实事件 `waypoint_reached / task_started / task_completed / task_stopped / emergency` 的 data 键与 mock 一致（最后一点 `nextTarget: null`）。`localization` / `obstacle` 两类事件在 Gazebo 里没出现过。
 - 真机完成后状态词会从 `completed` 回到 `idle`（`message` 变「巡检完成，共 N 个点」）；mock 加了 10 s 后自动回 idle 的行为。
+
+## 23:25 停止指令探针（3 次）+ 自动急停选项
+- 三次「导航途中中止」：#132 1 s 内 `task_stopped`；#133、#134 机器人不理会（15 s/12 s 后仍 NAVIGATING，走到终点才停），新加的 `task_stop_unconfirmed` 红色事件在真机上如期报出。**累计 9 次停止，4 次被忽略**（#113、#115、#133、#134），T22 比例约四成，且似乎成串出现。
+- 新增任务选项 `estop_if_stop_unconfirmed`（默认关）：停止核实不了就自动下发软件急停并通知，需人工在页面取消；mock 用例验证急停后机器人不再移动。真机上急停能否让 Gazebo 机器人停住，下个空档探针验证。

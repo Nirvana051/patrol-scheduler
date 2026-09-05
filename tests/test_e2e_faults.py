@@ -240,3 +240,27 @@ def test_abort_when_robot_ignores_stop_raises_alarm(app_client, mock_robot):
         mock_robot.ignore_stop = False
         mock_robot.task = mock_robot._idle_task()
         mock_robot.speed = 10.0
+
+
+def test_auto_estop_when_stop_unconfirmed(app_client, mock_robot):
+    """任务选项 estop_if_stop_unconfirmed：停止指令被机器人忽略 → 自动软件急停，机器人停止移动。"""
+    init_robot(app_client, '1')
+    mock_robot.speed = 0.6
+    mock_robot.ignore_stop = True
+    try:
+        tid = make_task(app_client, nodes=('20',), stop_wait_seconds=4, estop_if_stop_unconfirmed=True)
+        run_id = app_client.post(f'/api/tasks/{tid}/run').json()['id']
+        _wait_leg_status(app_client, run_id, ('navigating',))
+        app_client.post(f'/api/runs/{run_id}/abort')
+        run = wait_run(app_client, run_id, timeout=60)
+        assert run['status'] == 'aborted'
+        types = [e['type'] for e in run['events']]
+        assert 'task_stop_unconfirmed' in types and 'estop' in types
+        assert mock_robot.emergency_active is True
+        x1 = mock_robot.snapshot_state()['x']; time.sleep(1.0); x2 = mock_robot.snapshot_state()['x']
+        assert abs(x2 - x1) < 1e-6                                                   # 急停后不再移动
+    finally:
+        mock_robot.set_estop(False)
+        mock_robot.ignore_stop = False
+        mock_robot.task = mock_robot._idle_task()
+        mock_robot.speed = 10.0

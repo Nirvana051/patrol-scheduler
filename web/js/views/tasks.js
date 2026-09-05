@@ -54,7 +54,7 @@ async function showPlan(id) {
 
 export async function openTaskEditor(task, onSaved) {
   const t = task || { name: '', map_name: '', description: '', options: {}, items: [] };
-  const o = { settle_seconds: 2, leg_timeout: 600, not_started_timeout: 25, offline_timeout: 90, stall_timeout: 180, lease_retry_seconds: 30, lease_retries: 1, stop_wait_seconds: 15, lost_localization_action: 'pause', max_retries: 1, return_to_start: false, require_localized: true, speed: null, gait: null, obs_mode: null, ...t.options };
+  const o = { settle_seconds: 2, leg_timeout: 600, not_started_timeout: 25, offline_timeout: 90, stall_timeout: 180, lease_retry_seconds: 30, lease_retries: 1, stop_wait_seconds: 15, estop_if_stop_unconfirmed: false, lost_localization_action: 'pause', max_retries: 1, return_to_start: false, require_localized: true, speed: null, gait: null, obs_mode: null, ...t.options };
   let maps = [], tws = [];
   try { maps = (await api('/api/maps')).maps; } catch { /* ignore */ }
   const store = (await import('../app.js')).store; const codes = store.statusCodes?.control || {};
@@ -73,7 +73,7 @@ export async function openTaskEditor(task, onSaved) {
         <label class="small" title="下发遇 409（现场持有控制权）时等多久再试">控制权等待 (s)<input id="o-lease-wait" type="number" value="${o.lease_retry_seconds}"></label><label class="small">控制权重试次数<input id="o-lease-retries" type="number" min="0" value="${o.lease_retries}"></label>
         <label class="small" title="停任务后最多等多久核实机器人真的停了">停任务核实 (s)<input id="o-stopwait" type="number" min="0" value="${o.stop_wait_seconds}"></label>
         <label class="small" title="巡检途中丢定位怎么办">丢定位策略<select id="o-lostloc"><option value="pause" ${o.lost_localization_action === 'pause' ? 'selected' : ''}>停下并暂停，等人工重定位</option><option value="continue" ${o.lost_localization_action === 'continue' ? 'selected' : ''}>只记录，继续</option><option value="fail" ${o.lost_localization_action === 'fail' ? 'selected' : ''}>判段失败</option></select></label>
-      </div><div class="form-inline" style="margin-top:8px"><label><input type="checkbox" id="o-return" ${o.return_to_start ? 'checked' : ''}> 结束后返回起点</label><label><input type="checkbox" id="o-reqloc" ${o.require_localized !== false ? 'checked' : ''}> 执行前要求定位就绪（真机务必勾选）</label></div></fieldset>
+      </div><div class="form-inline" style="margin-top:8px"><label><input type="checkbox" id="o-return" ${o.return_to_start ? 'checked' : ''}> 结束后返回起点</label><label><input type="checkbox" id="o-reqloc" ${o.require_localized !== false ? 'checked' : ''}> 执行前要求定位就绪（真机务必勾选）</label><label title="中止/跳过时机器人不理会停止指令（实测偶发）就自动下发软件急停，需人工取消"><input type="checkbox" id="o-estopstop" ${o.estop_if_stop_unconfirmed ? 'checked' : ''}> 停不下来时自动急停</label></div></fieldset>
     </div>
     <div><div class="card-head"><h2>任务航点顺序</h2><div class="form-inline"><select id="t-add" style="width:220px"></select><button class="btn btn-sm" id="b-add">加入</button><button class="btn btn-sm" id="b-new-tw" title="在当前地图上新建一个任务航点并加入本任务">＋ 新建任务航点</button></div></div>
       <ol class="sortable" id="t-items"></ol><div class="help">上下箭头调整顺序。执行时按此顺序逐段前往。</div></div></div>`);
@@ -91,7 +91,7 @@ export async function openTaskEditor(task, onSaved) {
   foot.querySelector('#t-save').onclick = async (e) => {
     const d = { name: $('#t-name').value.trim(), map_name: $('#t-map').value, description: $('#t-desc').value, waypoint_ids: items.map(i => i.id),
       options: { speed: $('#o-speed').value === '' ? null : Number($('#o-speed').value), gait: $('#o-gait').value === '' ? null : Number($('#o-gait').value), obs_mode: $('#o-obs').value === '' ? null : Number($('#o-obs').value),
-        settle_seconds: Number($('#o-settle').value), leg_timeout: Number($('#o-timeout').value), not_started_timeout: Number($('#o-notstarted').value), offline_timeout: Number($('#o-offline').value), stall_timeout: Number($('#o-stall').value), lease_retry_seconds: Number($('#o-lease-wait').value), lease_retries: Number($('#o-lease-retries').value), stop_wait_seconds: Number($('#o-stopwait').value), lost_localization_action: $('#o-lostloc').value, max_retries: Number($('#o-retries').value), return_to_start: $('#o-return').checked, require_localized: $('#o-reqloc').checked } };
+        settle_seconds: Number($('#o-settle').value), leg_timeout: Number($('#o-timeout').value), not_started_timeout: Number($('#o-notstarted').value), offline_timeout: Number($('#o-offline').value), stall_timeout: Number($('#o-stall').value), lease_retry_seconds: Number($('#o-lease-wait').value), lease_retries: Number($('#o-lease-retries').value), stop_wait_seconds: Number($('#o-stopwait').value), lost_localization_action: $('#o-lostloc').value, max_retries: Number($('#o-retries').value), return_to_start: $('#o-return').checked, require_localized: $('#o-reqloc').checked, estop_if_stop_unconfirmed: $('#o-estopstop').checked } };
     if (!d.name) return toast('名称必填', 'warn'); if (!d.waypoint_ids.length) return toast('至少加入一个任务航点', 'warn');
     try { await busy(e.currentTarget, () => t.id ? api(`/api/tasks/${t.id}`, { method: 'PUT', body: d }) : api('/api/tasks', { method: 'POST', body: d })); toast('已保存', 'ok'); m.close(); onSaved && onSaved(); } catch (err) { toast(err.message, 'bad', 5000); }
   };

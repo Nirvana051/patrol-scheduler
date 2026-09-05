@@ -15,7 +15,7 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'stop_wait_seconds': 15.0, 'max_retries': 1,
+DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'stop_wait_seconds': 15.0, 'estop_if_stop_unconfirmed': False, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False,
                    'lost_localization_action': 'pause'}   # continue | pause | fail
@@ -175,6 +175,14 @@ class MissionRunner(threading.Thread):
         self._log('task_stop_unconfirmed', f'已发 DELETE /task 但 {wait_s:.0f} s 后云端任务仍在进行（机器人端未响应停止指令）——机器人可能还在走，请到现场确认或急停',
                   level='error')
         self.ctx.notify('task_stop_unconfirmed', {'run_id': self.run_id, 'task': self.task.get('name')})
+        if self.opt.get('estop_if_stop_unconfirmed'):
+            # 操作员明确要停而机器人不停：按任务选项自动急停（软件急停，需人工在页面上取消）
+            try:
+                self.ctx.gateway.estop()
+                self._log('estop', '停止指令未生效，已按任务选项自动下发急停（需人工在页面上取消）', level='error')
+                self.ctx.notify('estop_auto', {'run_id': self.run_id, 'task': self.task.get('name')})
+            except RobotError as e:
+                self._log('estop_failed', f'自动急停失败：{e}', level='error')
         return False
 
     # ── 前置检查 / 规划 ─────────────────────────────────────────────────────
