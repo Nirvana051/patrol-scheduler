@@ -48,6 +48,7 @@ class MissionRunner(threading.Thread):
         self.status = 'pending'
         self.legs: list[dict] = []
         self.current_leg_id: int | None = None
+        self.dispatched_any = False       # 本次执行是否真的下发过段 —— 没下发过就别去停云端任务（可能是别人的）
 
     # ── 对外控制 ─────────────────────────────────────────────────────────────
     def pause(self) -> None:
@@ -120,7 +121,9 @@ class MissionRunner(threading.Thread):
                 self._execute_leg(leg)
             self._finish('completed', None)
         except RunAbort as e:
-            if '外部替换' not in str(e):
+            # 只停我们自己下发过的任务：前置检查失败时一次都没下发，云端那个任务可能是
+            # 别人下发的巡检、或机器人重定位留下的状态（地图/路径为空的 NAVIGATING）——都不该我们去停。
+            if '外部替换' not in str(e) and self.dispatched_any:
                 self._safe_stop_task()
             self._finish('aborted', str(e))
         except LegFailed as e:
@@ -296,6 +299,7 @@ class MissionRunner(threading.Thread):
                                 raise RunAbort('人工中止')
                             continue
                         raise LegFailed(f"第 {leg['seq']} 段下发失败：{e}")
+                self.dispatched_any = True
                 self._set_leg(leg, status='dispatched', dispatched_at=now_iso())
                 self._log('leg_dispatched', f"第 {leg['seq']} 段：{self.cur_node} → {target}，路径 {' → '.join(path)}（{self.graph.path_length(path):.1f} m）",
                           leg_id=leg['id'], data={'path': path, 'idempotency_key': key, 'cursor': cursor, 'attempt': attempt})

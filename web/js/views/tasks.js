@@ -42,6 +42,32 @@ export function destroy() { offs.forEach(f => f()); offs = []; }
 
 async function runTask(id, btn, store) {
   let plan; try { plan = await api(`/api/tasks/${id}/plan`); } catch (e) { return toast(`无法规划：${e.message}`, 'bad', 6000); }
+  // 先查前置检查：不通过就别下发（否则只是多一条 aborted 记录），把原因和处置摆在确认框里
+  let pf = null;
+  try { pf = await busy(btn, () => api('/api/robot/preflight')); } catch { /* 读不到就照原流程走 */ }
+  if (pf && !pf.ok) {
+    const bad = pf.checks.filter(c => !c.ok);
+    const canStop = bad.some(c => c.fix === 'stop_task');
+    const foot = h(`<div style="display:flex;gap:8px"><button class="btn" data-a="no">知道了</button>${canStop ? '<button class="btn btn-warn" data-a="stop">停掉云端任务并重试</button>' : ''}<button class="btn" data-a="force">仍然执行</button></div>`);
+    const m = modal({ title: '前置检查未通过，先别执行', footer: foot,
+      content: `<ul class="checks">${bad.map(c => `<li>❌ ${esc(c.text)}</li>`).join('')}</ul>`
+        + `<div class="help">刚做过「定位」的话，云端任务会短暂停在 NAVIGATING（地图/路径为空）——点「停掉云端任务并重试」即可。</div>` });
+    foot.querySelector('[data-a=no]').onclick = () => m.close();
+    foot.querySelector('[data-a=force]').onclick = () => { m.close(); dispatchRun(id, btn, store, plan); };
+    if (canStop) foot.querySelector('[data-a=stop]').onclick = async (e) => {
+      try { await busy(e.currentTarget, () => api('/api/robot/task', { method: 'DELETE' })); } catch (err) { return toast(err.message, 'bad'); }
+      await new Promise(r => setTimeout(r, 2500));
+      const again = await api('/api/robot/preflight');
+      m.close();
+      if (again.ok) dispatchRun(id, btn, store, plan);
+      else toast('还是没通过：' + again.checks.filter(c => !c.ok).map(c => c.text).join('；'), 'bad', 8000);
+    };
+    return;
+  }
+  return dispatchRun(id, btn, store, plan);
+}
+
+async function dispatchRun(id, btn, store, plan) {
   const warn = plan.unreachable.length ? `<div class="badge bad">第 ${plan.unreachable.join(', ')} 段不连通，执行会在该段失败</div>` : '';
   const ok = await confirmDialog({ title: store.isReal ? '⚠ 真机执行确认' : '执行任务', okText: '开始执行', danger: store.isReal,
     body: `${store.isReal ? '<p><b>这会让真实机器人走起来。</b>确认现场没人在路径上、有人能按物理急停。</p>' : ''}<p>起点 ${esc(plan.start_node || '—')}${plan.start_note ? `（${esc(plan.start_note)}）` : ''}，共 ${plan.legs.length} 段，约 ${plan.total_length} m。</p>${warn}<div class="mono small muted">${plan.legs.map(l => `${l.seq}. ${esc(l.name)}: ${l.path ? l.path.join('→') : '不可达'}`).join('<br>')}</div>` });

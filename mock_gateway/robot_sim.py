@@ -249,6 +249,19 @@ class MockRobot:
             _ = wps
             return {'accepted': True, 'map_name': map_name, 'path': list(path)}
 
+    def set_relocalizing(self, on: bool = True) -> dict:
+        """复刻真机：机器人端做重定位时任务状态是 NAVIGATING，但 map_name 与 path 都是空的。
+        刚点过「定位」就执行必然撞上前置检查的「云端有任务在跑」（2026-09-07 现场反复遇到）。"""
+        with self.lock:
+            if on:
+                self.task = self._idle_task()
+                self.task['status_code'] = 3
+                self.task['message'] = '重定位中'
+                self.emit('task_started', {'map': '', 'path': [], 'statusCode': 3})
+            else:
+                self.task = self._idle_task()
+            return {'relocalizing': on, 'task': self.task_view()}
+
     def stop_task(self) -> dict:
         with self.lock:
             if self.ignore_stop:

@@ -235,3 +235,43 @@ def test_start_node_auto_when_unset(app_client, mock_robot):
     assert run['status'] == 'completed' and run['legs'][0]['from_node'] == '1'
     ev = next(e for e in run['events'] if e['type'] == 'start_node')
     assert '未指定起点' in ev['message'] and DEMO_MAP or True
+
+
+def test_preflight_failure_does_not_stop_someone_elses_cloud_task(app_client, mock_robot):
+    """前置检查失败时我们一次都没下发过 —— 绝不能去停云端那个任务（可能是别人的，或重定位残留）。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')
+    tid = make_task(app_client, nodes=('5',))
+    mock_robot.speed = 0.5
+    try:
+        # 模拟「现场有人下发了一条别的巡检」
+        mock_robot.start_task(DEMO_MAP, ['1', '2', '3', '4', '5', '6', '7', '8'], {})
+        assert mock_robot.snapshot_state()['task']['active'] is True
+        run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'], timeout=40)
+        assert run['status'] == 'aborted' and '云端有任务在跑' in run['error']
+        # 关键：别人的任务还在跑，没被我们停掉
+        st = mock_robot.snapshot_state()['task']
+        assert st['active'] is True and len(st['path']) == 8
+        assert not any(e['type'] == 'task_stop_requested' for e in run['events'])
+        # 提示里要写清楚云端在跑什么，方便判断是不是自己的
+        pf_ev = next(e for e in run['events'] if e['type'] == 'preflight')
+        idle = next(c for c in pf_ev['data']['checks'] if c['key'] == 'idle')
+        assert '8 个航点' in idle['text'] and idle['fix'] == 'stop_task'
+    finally:
+        mock_robot.stop_task()
+        mock_robot.speed = 10.0
+
+
+def test_preflight_names_relocalization_leftover(app_client, mock_robot):
+    """机器人重定位期间任务是「NAVIGATING 但地图/路径为空」：提示要点明这是残留，可停任务清掉。"""
+    init_robot(app_client, '1')
+    with mock_robot.lock:                        # 直接摆出重定位时的状态
+        mock_robot.task['status_code'] = 3
+        mock_robot.task['map_name'] = ''
+        mock_robot.task['path'] = []
+    try:
+        pf = app_client.get('/api/robot/preflight').json()
+        idle = next(c for c in pf['checks'] if c['key'] == 'idle')
+        assert idle['ok'] is False and '路径为空' in idle['text'] and '定位' in idle['text']
+    finally:
+        mock_robot.task = mock_robot._idle_task()

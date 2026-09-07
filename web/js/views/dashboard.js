@@ -132,7 +132,26 @@ export async function render(root, { store }) {
     try { const r = await busy(e.currentTarget, () => api('/api/robot/init/localize', { method: 'POST', body: { map_name: mapSel.value, node_id: nodeSel.value } })); devMsg.textContent = `定位成功，偏差 ${r.drift} m（阈值 ${r.threshold} m）`; toast('定位成功', 'ok'); }
     catch (err) { devMsg.textContent = ''; toast(`定位失败：${err.message}`, 'bad', 6000); }
   };
-  root.querySelector('#b-refresh').onclick = async (e) => { try { const pf = await busy(e.currentTarget, () => api('/api/robot/preflight')); root.querySelector('#preflight').innerHTML = `<b>执行前置检查：</b>${pf.ok ? badge('全部通过', 'ok') : badge('未通过', 'bad')}<ul class="checks">${pf.checks.map(c => `<li>${c.ok ? '✅' : '❌'} ${esc(c.text)}</li>`).join('')}</ul>`; } catch (err) { toast(err.message, 'bad'); } };
+  const paintPreflight = (pf) => {
+    const fixBtn = (c) => {
+      if (c.ok) return '';
+      if (c.fix === 'stop_task') return ' <button class="btn btn-xs btn-warn" data-fix="stop_task">停任务</button>';
+      if (c.fix === 'clear_estop') return ' <button class="btn btn-xs btn-ok" data-fix="clear_estop">取消急停</button>';
+      if (c.fix === 'init') return ' <span class="small muted">↓ 用下面的「② 启动设备 / ④ 定位」</span>';
+      return '';
+    };
+    root.querySelector('#preflight').innerHTML = `<b>执行前置检查：</b>${pf.ok ? badge('全部通过', 'ok') : badge('未通过', 'bad')}`
+      + `<ul class="checks">${pf.checks.map(c => `<li>${c.ok ? '✅' : '❌'} ${esc(c.text)}${fixBtn(c)}</li>`).join('')}</ul>`;
+    root.querySelectorAll('#preflight [data-fix]').forEach(b => b.onclick = async () => {
+      try {
+        if (b.dataset.fix === 'stop_task') await busy(b, () => api('/api/robot/task', { method: 'DELETE' }));
+        else await busy(b, () => api('/api/robot/estop', { method: 'POST', body: { active: false } }));
+        toast('已处理，正在重新检查…', 'ok');
+        setTimeout(async () => { try { paintPreflight(await api('/api/robot/preflight')); } catch { /* ignore */ } }, 2500);
+      } catch (err) { toast(err.message, 'bad', 6000); }
+    });
+  };
+  root.querySelector('#b-refresh').onclick = async (e) => { try { paintPreflight(await busy(e.currentTarget, () => api('/api/robot/preflight'))); } catch (err) { toast(err.message, 'bad'); } };
   root.querySelector('#b-snap').onclick = async (e) => { try { const r = await busy(e.currentTarget, () => api('/api/robot/snapshot', { method: 'POST' })); showImage(r.url, `${r.width}×${r.height} · ${r.source}`); toast('已抓取一张全景', 'ok'); } catch (err) { toast(`抓帧失败：${err.message}`, 'bad', 6000); } };
 
   // 视频

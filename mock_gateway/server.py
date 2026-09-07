@@ -417,6 +417,8 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
             with robot.lock:
                 robot.robot_version = 'new' if b.get('version') == 'new' else 'legacy'
             return {'ok': True, 'robot_version': robot.robot_version}
+        if b.get('kind') == 'relocalizing':
+            return robot.set_relocalizing(bool(b.get('on', True)))
         if b.get('kind') == 'ignore_stop':
             with robot.lock:
                 robot.ignore_stop = bool(b.get('on', True))
@@ -477,6 +479,11 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
         b = await body_json(request)
         robot.speed = float(b.get('speed') or 1.0)
         return {'ok': True, 'speed': robot.speed}
+
+    @app.post('/mock/relocalizing')
+    async def mock_relocalizing(request: Request):
+        b = await body_json(request)
+        return robot.set_relocalizing(bool(b.get('on', True)))
 
     @app.post('/mock/reset')
     async def mock_reset(request: Request):

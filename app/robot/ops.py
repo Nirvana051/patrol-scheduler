@@ -114,7 +114,20 @@ class RobotOps:
                 text = '定位未就绪：先做「启动设备 → 定位」'
             add('localized', (not require_localized) or loc_ok, text, fix='init')
             t = s.get('task') or {}
-            add('idle', not t.get('active'), '云端无进行中的任务' if not t.get('active') else f"云端有任务在跑：{t.get('status_name')}", fix='stop_task')
+            if not t.get('active'):
+                add('idle', True, '云端无进行中的任务')
+            else:
+                path = t.get('path') or []
+                where = f"地图 {t.get('map_name') or '(空)'}、{len(path)} 个航点、目标 {t.get('current_target') or '-'}"
+                if not path:
+                    # 机器人端重定位期间任务状态就是这样：NAVIGATING 但没有地图也没有路径。
+                    # 刚点过「定位」就执行必然撞上这个（真机实测）。
+                    why = '——路径为空，多半是刚做过定位/上次操作留下的残留状态，点顶栏「停任务」清掉即可'
+                elif t.get('map_name') == (s.get('info') or {}).get('_ourmap'):
+                    why = ''
+                else:
+                    why = '——如果不是你下发的，可能是现场有人在操作；等它跑完或联系对方，别直接抢'
+                add('idle', False, f"云端有任务在跑：{t.get('status_name')}（{where}）{why}", fix='stop_task')
         add('lease', not self._lease_held_by_human(s), '控制权可用' if not self._lease_held_by_human(s)
             else f"控制权被 {((s.get('lease') or {}).get('owner'))} 持有（现场有人在操作）")
         return {'ok': all(c['ok'] for c in checks), 'checks': checks, 'status': s}
