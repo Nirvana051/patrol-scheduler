@@ -208,3 +208,16 @@ def test_qwen_key_falls_back_to_dashscope_env(tmp_path, monkeypatch):
     assert build_provider(Config(env_file=tmp_path / 'no.env')).api_key == 'sk-from-env'
     monkeypatch.setenv('VLM_API_KEY', 'sk-explicit')
     assert build_provider(Config(env_file=tmp_path / 'no.env')).api_key == 'sk-explicit'   # 显式配置优先
+
+
+def test_qwen_ignores_untouched_generic_base_url(tmp_path, monkeypatch):
+    """VLM_BASE_URL 还是通用默认值（Ollama 地址）时，qwen 必须走 DashScope 地址，别把请求发去 11434。"""
+    from app.config import DEFAULTS, Config
+    from app.vlm.base import build_provider
+    from app.vlm.openai_compat import QwenVlm
+    monkeypatch.setenv('VLM_PROVIDER', 'qwen')
+    monkeypatch.delenv('VLM_BASE_URL', raising=False)          # 不设 → Config 回落到 DEFAULTS（Ollama）
+    assert DEFAULTS['VLM_BASE_URL'] == 'http://127.0.0.1:11434/v1'
+    assert build_provider(Config(env_file=tmp_path / 'no.env')).base_url == QwenVlm.DEFAULT_BASE_URL
+    monkeypatch.setenv('VLM_BASE_URL', 'http://my-gateway/v1')  # 显式填了就用它
+    assert build_provider(Config(env_file=tmp_path / 'no.env')).base_url == 'http://my-gateway/v1'

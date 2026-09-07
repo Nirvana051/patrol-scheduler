@@ -14,6 +14,9 @@ import re
 import time
 from dataclasses import dataclass, field
 
+#: `VLM_BASE_URL` 的通用默认值（Ollama）。qwen 分支拿它判断「用户没填过地址」。
+DEFAULT_BASE_URL_HINT = 'http://127.0.0.1:11434/v1'
+
 SYSTEM_PROMPT = (
     '你是四足巡检机器人的视觉判读助手。机器人头顶是 360° 全景相机，你会收到全景图中按角度范围裁切出来的局部'
     '（有时还附整张全景作参考），以及一个需要用「是/不是」回答的检查问题。\n'
@@ -139,7 +142,11 @@ def build_provider(cfg) -> VlmProvider:
         from .openai_compat import QwenVlm
         # 密钥优先用 VLM_API_KEY；为空时回落到 DASHSCOPE_API_KEY —— 阿里官方示例就是读这个环境变量
         key = cfg.get('VLM_API_KEY') or os.environ.get('DASHSCOPE_API_KEY') or ''
-        return QwenVlm(cfg.get('VLM_BASE_URL'), cfg.get('VLM_MODEL'), key,
+        # VLM_BASE_URL 没填过（等于通用默认值，那是 Ollama 的地址）就当没设，走 DashScope 兼容模式地址
+        base = cfg.get('VLM_BASE_URL')
+        if base == DEFAULT_BASE_URL_HINT:
+            base = ''
+        return QwenVlm(base, cfg.get('VLM_MODEL'), key,
                        timeout=cfg.get_float('VLM_TIMEOUT'), extra_body=_extra_body(cfg))
     if p == 'openai_compat':
         from .openai_compat import OpenAICompatVlm

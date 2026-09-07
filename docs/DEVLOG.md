@@ -268,3 +268,4 @@
 - `config/.env` 的 VLM 段已配成 `VLM_PROVIDER=qwen` / `VLM_MODEL=qwen3.5-flash` / `VLM_BASE_URL=`（留空走 DashScope 兼容模式地址），密钥留空等粘贴。
 - 新增：`VLM_API_KEY` 为空时回落到 `DASHSCOPE_API_KEY` 环境变量（与官方示例同一约定）。
 - 用假密钥探过一次：请求确实打到 DashScope 并拿回它的鉴权错误，说明地址/请求体/参数这条链是通的，只差真密钥。
+- 探针帮我抓到自己的一个配置解析错：`VLM_BASE_URL` 留空时会回落到通用默认值（Ollama 的 11434），请求发错了地方。改成「地址还是通用默认值就当没填 → 走 DashScope」。再探一次：请求确实打到 `dashscope.aliyuncs.com`，拿回它的 `401 Incorrect API key（invalid_api_key）`——整条链只差真密钥。
