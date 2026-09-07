@@ -292,6 +292,8 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 | T26 | **`/position` 200 不代表定位新鲜**：机器人端停发 `/global_localization` 后云端回放缓存值（2026-09-07 现场：位姿冻结 20 小时、仍 200），我们原先 `position_ready OR fresh` 会误判就绪 | 会在机器人「其实不知道自己在哪」时放行执行 | **已修**：改为「有遥测则要求新鲜且 /position 非 503」，前置检查明确写出「定位数据已陈旧 N 小时」；mock 加 `freeze_telemetry` 注入 + 用例 |
 
+| T27 | `settings` 表里的 `CX_*` 覆盖 `config/.env`，`start.sh --mock` 导出的 mock 环境变量因此失效（库里现存 `CX_ROBOT=fulin-factory-car`） | `--mock` 会连 mock 网关却去找这台机器人，事件流连不上 | 变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`（另起一个库，也顺带不污染真机统计）。彻底做法：给 mock 模式独立数据目录，或加「环境变量优先」开关 |
+
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
 |---|------|-----------|
@@ -305,6 +307,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
 
 ### 9.3 已解决（留档）
+T28 TTS 合成跑在 `ThreadPoolExecutor` 的非守护线程里，合成一卡进程就退不掉（30 s+），`start.sh --stop` 落到 SIGKILL → 应用来不及中止执行与 `DELETE /task`，机器人会继续走。改成每次合成起守护线程 + join 超时（实测卡死后仍 0.26 s 干净退出）。
 T24 真实云端在任务被中途替换时不发新的 `task_started`（状态无跃迁）→ 外部任务识别改为按事件 `total`/`visited` 与对账 `path` 比对（09-05 演练 D 抓到，run #119 曾误标完成）。
 T23 mock → 真机切换后真机云端事件静默丢失（唯一索引全局按 `cloud_seq`，与 mock 时期的行撞号）→ schema v6 按 (gateway, cloud_seq) 唯一，监听器暴露 `dropped` 计数。
 T21 edge-tts 合成无超时，通宵观察中真的卡死了一条执行（04:43 起 `inspecting` 不动，定时计划被跳过）→ 合成放到工作线程并带 `TTS_TIMEOUT`（默认 20 s），超时记错误、执行继续；启动时把上次进程残留的「进行中」执行标记为中止（`runs_reconciled`）。

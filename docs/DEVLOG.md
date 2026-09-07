@@ -256,3 +256,9 @@
 - 顺手改进：VLM 服务端错误现在带出 `error.message` 与 code（接新服务商时密钥/模型名写错能一眼看出）；新增 `scripts/vlm_probe.py`（`make vlm`）——拿最近一次检查的裁切图 + 一句问题探一次，可用 `--provider/--model/--key` 临时覆盖而不写回配置。
 - 测试：假 DashScope 服务断言请求体带 `enable_thinking:false` 与合并后的私有参数、图片走 data URI、错误原文被带出；`build_provider('qwen')` 的默认值与坏 JSON 容错。
 - 待用户给 DashScope 密钥后实测 `qwen3.5-flash` 是否真能读图（若拒收就换 `qwen3-vl-plus` / `qwen-vl-max`）。
+
+## 09-07 20:20 `start.sh --stop` 会落到 SIGKILL（TTS 非守护线程拖住退出）
+- 现象：`--stop` 先 SIGTERM、等 10 s 再 SIGKILL；实测有个真机实例等满 30 s 都没退，被强杀。强杀跳过了应用的收尾（中止执行 + `DELETE /task`），**真机会带着任务继续走**。
+- 定位：TTS 合成放在 `ThreadPoolExecutor` 里，它的工作线程是**非守护**的 —— 解释器退出时 `atexit` 会 join 它们。合成一卡（edge-tts 真的会卡，T21），进程就退不掉（最小复现：卡住的池任务让进程 25 s 仍未退出）。调用方那层 `fut.result(timeout=)` 只让调用方返回，卡住的工作线程还在。
+- 修法：改成每次合成起一个**守护线程** + `join(timeout)`，超时就把它丢下（守护线程不阻塞退出）。隔离实例实测：故意让合成卡死后 SIGTERM，**0.26 s 干净退出**（修复前 30 s+ 被强杀）。
+- 顺带发现（未改，仅记录）：`settings` 表里的 `CX_*` 优先级高于 `config/.env`，所以 `start.sh --mock` 导出的 mock 环境变量会被库里存的 `CX_ROBOT` 覆盖 —— 现在库里存的是 `fulin-factory-car`，`--mock` 会连着 mock 网关却去找这台机器人（事件流连不上）。真要用 mock，临时指定另一个库：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`。

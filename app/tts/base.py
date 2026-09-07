@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import shlex
 import shutil
 import subprocess
@@ -168,15 +167,30 @@ class TtsService:
         self.url_prefix = url_prefix
         self.timeout = float(timeout)
         self.lock = threading.Lock()
-        # 合成放到工作线程里、带上限等待：即使引擎本身不理会取消，也不能拖住执行器
-        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='tts')
 
     def _synthesize(self, text: str, out_path: Path) -> Path | None:
-        fut = self._pool.submit(self.engine.synthesize, text, out_path)
-        try:
-            return fut.result(timeout=self.timeout + 1.0)
-        except concurrent.futures.TimeoutError:
+        """合成放到**守护**线程里、带上限等待：即使引擎本身不理会取消，也不能拖住执行器。
+
+        刻意不用 ThreadPoolExecutor —— 它的工作线程是非守护的，解释器退出时 atexit 会 join 它们：
+        一个卡住的合成（edge-tts 真的会卡，见 T21）会让进程 30 s 都退不掉，
+        于是 `start.sh --stop` 落到 SIGKILL，应用就来不及中止执行、给云端发 DELETE /task 停机器人。
+        守护线程被超时丢下后不影响退出。
+        """
+        box: dict = {}
+
+        def work() -> None:
+            try:
+                box['path'] = self.engine.synthesize(text, out_path)
+            except BaseException as e:      # noqa: BLE001 —— 原样交回调用方
+                box['error'] = e
+        th = threading.Thread(target=work, name='tts-synth', daemon=True)
+        th.start()
+        th.join(self.timeout + 1.0)
+        if th.is_alive():
             raise TimeoutError(f'合成超时（>{self.timeout:.0f}s）')
+        if 'error' in box:
+            raise box['error']
+        return box.get('path')
 
     def describe(self) -> dict:
         return {'engine': self.engine.name, 'sinks': [s.name for s in self.sinks]}

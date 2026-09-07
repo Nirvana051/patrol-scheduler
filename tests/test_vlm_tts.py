@@ -56,3 +56,28 @@ def test_tts_hung_engine_times_out_but_browser_sink_still_gets_text(tmp_path):
     assert time.time() - t0 < 3.0                                   # 不会等满 4 s
     assert '超时' in r['error'] and r['audio_url'] is None
     assert q.get_nowait()['payload']['text'] == '卡住的合成'          # 文本仍推给浏览器朗读
+
+
+def test_tts_synth_thread_is_daemon_so_a_hang_cannot_block_exit(tmp_path):
+    """卡住的合成不能拖住进程退出 —— 否则 start.sh --stop 会落到 SIGKILL，
+    应用就来不及中止执行、给云端发 DELETE /task 把机器人停下。"""
+    import threading
+    import time
+    from app.bus import Bus
+    from app.tts.base import BrowserSink, TtsEngine, TtsService
+
+    started = threading.Event()
+
+    class HangEngine(TtsEngine):
+        name, ext = 'hang', 'wav'
+
+        def synthesize(self, text, out_path):
+            started.set()
+            time.sleep(30)
+            return None
+    svc = TtsService(HangEngine(), [BrowserSink(Bus())], tmp_path, timeout=0.3)
+    r = svc.speak('卡住的合成')
+    assert '超时' in r['error']
+    assert started.wait(2)
+    hung = [t for t in threading.enumerate() if t.name == 'tts-synth']
+    assert hung and all(t.daemon for t in hung), '合成线程必须是守护线程'

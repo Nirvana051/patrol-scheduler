@@ -1,5 +1,8 @@
 # 变更记录
 
+## [0.4.3] - 2026-09-07
+- 修：TTS 合成改用守护线程（原先 `ThreadPoolExecutor` 的非守护线程被卡住时，进程 30 s+ 退不掉，`start.sh --stop` 只能 SIGKILL，应用来不及中止执行并 `DELETE /task` 停机器人）
+
 ## [0.4.2] - 2026-09-07
 - 新增 `qwen` VLM 提供方（阿里 DashScope 兼容模式）：默认地址、模型 `qwen3.5-flash`，**自动带 `enable_thinking:false`**（非流式调用缺这个参数会 400）
 - 新增 `VLM_EXTRA_BODY`：JSON 对象合并进请求体，用于服务商私有参数（如 `vl_high_resolution_images`）
