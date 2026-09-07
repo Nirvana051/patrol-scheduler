@@ -2,7 +2,7 @@ import { api, h, esc, fmt, toast, busy, badge, modal, confirmDialog, statusBadge
 import { openWaypointEditor } from './waypoints.js';
 let offs = [];
 
-export async function render(root, { store }) {
+export async function render(root, { store, params }) {
   root.innerHTML = `<div class="page-head"><h1>任务规划</h1><div class="actions"><button class="btn btn-primary" id="b-new">＋ 新建任务</button></div></div>
   <div class="help" style="margin-bottom:10px">任务 = 地图 + 有序的任务航点 + 执行选项。执行时按「当前航点 → 下一个任务航点」分段下发云端任务（机器狗不能在航点暂停），每段到达后做检查。</div>
   <div class="table-wrap"><table><thead><tr><th>#</th><th>任务</th><th>地图</th><th>航点数</th><th>起始点</th><th>速度/步态/避障</th><th>定时</th><th>最近执行</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
@@ -33,6 +33,10 @@ export async function render(root, { store }) {
   root.querySelector('#b-new').onclick = () => openTaskEditor(null, load);
   offs.push(store.on('run', load));
   await load();
+  if (params && params[0]) {                       // #/tasks/9 直接打开编辑器
+    try { openTaskEditor(await api(`/api/tasks/${Number(params[0])}`), load); location.hash = '#/tasks'; }
+    catch (e) { toast(`打不开任务 ${params[0]}：${e.message}`, 'bad'); }
+  }
 }
 export function destroy() { offs.forEach(f => f()); offs = []; }
 

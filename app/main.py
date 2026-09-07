@@ -24,6 +24,19 @@ from app.robot.ops import OpsError
 WEB_DIR = Path(__file__).resolve().parent.parent / 'web'
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """前端文件一律不许浏览器缓存。
+
+    都是本机几十 KB 的文件，缓存省不下什么；但一旦浏览器缓存了旧的 ES 模块，
+    改了 UI 却看不到变化 —— 排查起来很费时间（真发生过）。
+    """
+
+    async def get_response(self, path: str, scope):      # type: ignore[override]
+        resp = await super().get_response(path, scope)
+        resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+        return resp
+
+
 def _setup_file_logging(log_dir: Path) -> None:
     root = logging.getLogger()
     if any(getattr(h, '_ps_file', False) for h in root.handlers):
@@ -94,7 +107,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
 
     app.mount('/media', StaticFiles(directory=str(ctx.media_dir)), name='media')
     if WEB_DIR.exists():
-        app.mount('/', StaticFiles(directory=str(WEB_DIR), html=True), name='web')
+        app.mount('/', NoCacheStaticFiles(directory=str(WEB_DIR), html=True), name='web')
     return app
 
 
