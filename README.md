@@ -1,5 +1,9 @@
 # patrol-scheduler · 巡检调度系统
 
+> 建立在 [kafeiyin00/Sample_web_api](https://github.com/kafeiyin00/Sample_web_api)（certaintyX 机器狗云端 API 教程）之上。
+> `app/vendor/certaintyx.py` 是该仓库 SDK 的原样拷贝，随上游更新同步。
+> 凭据只放在 `config/.env`（已 gitignore），仓库里不含任何密钥。
+
 在 certaintyX 机器狗云端 API 之上的本地网页操作台：管理任务航点 / 任务 / 执行 / 事件，
 按「当前航点 → 下一个任务航点」分段下发巡检；到点后抓全景 → 按角度范围裁切 → VLM 判「是 / 不是」→ 按答案模版 TTS 播报。
 

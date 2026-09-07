@@ -293,7 +293,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 | T26 | **`/position` 200 不代表定位新鲜**：机器人端停发 `/global_localization` 后云端回放缓存值（2026-09-07 现场：位姿冻结 20 小时、仍 200），我们原先 `position_ready OR fresh` 会误判就绪 | 会在机器人「其实不知道自己在哪」时放行执行 | **已修**：改为「有遥测则要求新鲜且 /position 非 503」，前置检查明确写出「定位数据已陈旧 N 小时」；mock 加 `freeze_telemetry` 注入 + 用例 |
 
-| T27 | `settings` 表里的 `CX_*` 覆盖 `config/.env`，`start.sh --mock` 导出的 mock 环境变量因此失效（库里现存 `CX_ROBOT=fulin-factory-car`） | `--mock` 会连 mock 网关却去找这台机器人，事件流连不上 | 变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`（另起一个库，也顺带不污染真机统计）。彻底做法：给 mock 模式独立数据目录，或加「环境变量优先」开关 |
+| T27 | `settings` 表里的 `CX_*` 覆盖 `config/.env`，`start.sh --mock` 导出的 mock 环境变量因此失效（库里现存 `CX_ROBOT=<另一台机器人的别名>`） | `--mock` 会连 mock 网关却去找这台机器人，事件流连不上 | 变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`（另起一个库，也顺带不污染真机统计）。彻底做法：给 mock 模式独立数据目录，或加「环境变量优先」开关 |
 
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
