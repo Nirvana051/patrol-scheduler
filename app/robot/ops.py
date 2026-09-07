@@ -102,9 +102,17 @@ class RobotOps:
                 '无急停指令' if not s.get('emergency_active') else '急停指令正在下发，巡检指令会与之竞争', fix='clear_estop')
             add('ros', s.get('ros_available', True), 'ROS 可用' if s.get('ros_available', True) else 'ROS 不可用：读到的都是陈旧值')
             loc = s.get('localization') or {}
-            loc_ok = bool(s.get('position_ready')) or bool(loc.get('fresh'))
-            add('localized', (not require_localized) or loc_ok,
-                f"定位就绪（数据年龄 {loc.get('age')} s）" if loc_ok else '定位未就绪：先做「启动设备 → 定位」', fix='init')
+            loc_ok = bool(s.get('localized'))
+            if loc_ok:
+                text = f"定位就绪（数据年龄 {loc.get('age')} s）"
+            elif s.get('localization_stale'):
+                age = loc.get('age')
+                aged = f'{age / 3600:.1f} 小时' if age and age > 3600 else f'{age} s'
+                text = (f'定位数据已陈旧 {aged}：机器人端不再发布 /global_localization（仿真/导航栈停了？）。'
+                        '注意 /position 仍会回放缓存值，不能据此判断')
+            else:
+                text = '定位未就绪：先做「启动设备 → 定位」'
+            add('localized', (not require_localized) or loc_ok, text, fix='init')
             t = s.get('task') or {}
             add('idle', not t.get('active'), '云端无进行中的任务' if not t.get('active') else f"云端有任务在跑：{t.get('status_name')}", fix='stop_task')
         add('lease', not self._lease_held_by_human(s), '控制权可用' if not self._lease_held_by_human(s)

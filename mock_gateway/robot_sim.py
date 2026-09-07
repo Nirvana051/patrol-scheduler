@@ -74,6 +74,8 @@ class MockRobot:
         self.html502_left = 0            # >0 时接下来 n 次机器人端请求返回 nginx 风格的 HTML 502
         self.html502_only_task = False   # True 时只对 GET /task 注入（测执行器对账）
         self.ignore_stop = False         # True 时 DELETE /task 回 200 但机器人继续走（真实 Gazebo 机器人实测如此）
+        self.freeze_telemetry_at = 0.0    # >0 时 global_localization/odom 的 received_at 冻结在这个时刻（机器人端停止发布，云端回放缓存值）
+        self.robot_version = 'legacy'     # legacy = 2026-09-06 之前（Location 恒 1、estop 空体当 false）；new = 已修复
         self.completed_to_idle_seconds = 10.0   # 真机：COMPLETED 停留一会后自动回到 IDLE（path/message 保留）
         self._completed_at = 0.0
         self.drop_events = False
@@ -157,7 +159,6 @@ class MockRobot:
         with self.lock:
             now = time.time()
             rt = self.ros_time()
-            loc_ok = self.localized and now >= self.loc_lost_until
             status_zh = self.status_values[self.task['status_code']]['zh'] if self.task['status_code'] else '待机中'
             pose = {'x': self.x, 'y': self.y, 'z': self.z, 'yaw': self.yaw}
             return {
@@ -167,9 +168,10 @@ class MockRobot:
                 'telemetry': {
                     'robot_info': {'id': self.robot_id, 'name': 'R30_v1', 'status': status_zh, 'message': '',
                                    'received': True, 'stamp': now},
-                    'global_localization': {'received': self.localized, 'received_at': self.loc_received_at if loc_ok else self.loc_received_at,
+                    'global_localization': {'received': self.localized, 'received_at': self.freeze_telemetry_at or self.loc_received_at,
                                             'stamp': rt, **pose},
-                    'odom': {'received': True, 'stamp': rt, 'linear': self.linear, 'angular': 0.0, **pose},
+                    'odom': {'received': True, 'stamp': rt, 'linear': self.linear, 'angular': 0.0,
+                             'received_at': self.freeze_telemetry_at or now, **pose},
                     'initial_pose': {'received': False, 'stamp': 0, 'x': 0, 'y': 0, 'yaw': 0, 'z': 0},
                     'clicked_point': {'received': False, 'stamp': 0, 'x': 0, 'y': 0},
                 },
@@ -184,10 +186,14 @@ class MockRobot:
     def perception(self) -> dict:
         with self.lock:
             avoiding = time.time() < self.avoiding_until
-            # Location 恒为 1：复刻机器人端拿 Unix 时间减 ROS 时间戳的 bug
-            return {'Location': 1, 'ObsState': 1 if avoiding else 0,
-                    'location_valid': False, 'avoiding': avoiding,
-                    'location_text': '定位无效', 'obs_text': '正在避障' if avoiding else '前方无障碍'}
+            # legacy（2026-09-06 之前，我们现场那台就是）：Location 恒为 1 —— 机器人端拿 Unix 时间减 ROS 时间戳的 bug。
+            # new：按 received_at 判断，定位正常时如实返回 0。
+            valid = (self.robot_version == 'new' and self.localized and not self.freeze_telemetry_at
+                     and time.time() >= self.loc_lost_until)
+            loc = 0 if valid else 1
+            return {'Location': loc, 'ObsState': 1 if avoiding else 0,
+                    'location_valid': loc == 0, 'avoiding': avoiding,
+                    'location_text': '定位有效' if loc == 0 else '定位无效', 'obs_text': '正在避障' if avoiding else '前方无障碍'}
 
     def task_view(self) -> dict:
         with self.lock:
@@ -404,6 +410,7 @@ class MockRobot:
             self.html502_left = 0
             self.html502_only_task = False
             self.ignore_stop = False
+            self.freeze_telemetry_at = 0.0
             self.drop_events = False
             self.lease = None
             self.linear = 0.0
@@ -415,6 +422,7 @@ class MockRobot:
             return {'x': self.x, 'y': self.y, 'yaw': self.yaw, 'online': self.online,
                     'ros_available': self.ros_available, 'emergency_active': self.emergency_active,
                     'device_started': self.device_started, 'localized': self.localized,
+                    'freeze_telemetry_at': self.freeze_telemetry_at, 'robot_version': self.robot_version,
                     'current_map': self.current_map, 'task': self.task_view(), 'seq': self.seq,
                     'lease': self.lease, 'fault_next_leg': self.fault_next_leg,
                     'drop_events': self.drop_events, 'speed': self.speed}

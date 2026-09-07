@@ -32,7 +32,7 @@ make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 
 | 想改 | 看 |
 |------|----|
-| 与云端的调用 / 限速 / 429 | `app/robot/client.py`（SDK 原样在 `app/vendor/certaintyx.py`，不改） |
+| 与云端的调用 / 限速 / 429 | `app/robot/client.py`（只做限速 + HTML 错误清洗；重试都在 SDK 里）。SDK 原样在 `app/vendor/certaintyx.py`，**不要本地改** —— 上游更新时 `cp ../Sample_web_api/examples/python/certaintyx.py app/vendor/` 同步（最近同步：6167083） |
 | 状态灯、定位是否就绪 | `app/robot/status.py`（C9：看 `received_at`，不看 `Location`） |
 | 云端事件监听、游标、落库 | `app/robot/events.py` |
 | 分段执行状态机（下发/到达/失败/重试/暂停/丢定位/外部任务） | `app/executor/runner.py` |
@@ -53,7 +53,9 @@ make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 5. 进程重启后残留的「进行中」执行要标为中止（已做）；进程退出前先 DELETE /task（已做）。
 6. `pkill -f` 会匹配到自己的命令行把 shell 杀掉 → 用 `start.sh` / pid 文件。
 7. 测试用例共用一个 mock 机器人：残留执行线程会污染后面的用例（`RunManager.shutdown()`）。
-8. 真实网关 idle 时 `/task` 不带 `progress`；mock 已对齐。其他 mock/真机差异随夜测回填到 `mock_gateway/`。
+8. 真实网关 idle 时 `/task` 不带 `progress`；mock 已对齐。
+9. **`/position` 200 不代表定位新鲜**（云端回放缓存值）——定位就绪只认 `received_at` 新鲜度。
+10. 现场那台机器人端是 **2026-09-06 之前的 legacy 版**：`Location` 恒 1、estop 空体当「取消」。mock 可用 `/mock/robot-version` 切到新版行为。其他 mock/真机差异随夜测回填到 `mock_gateway/`。
 
 ## 6. 未完成 / 待真机确认
 
@@ -64,4 +66,4 @@ make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 `task.md`（总纲）· `DEVLOG.md`（逐时日志）· `TODO.md` · `ROADMAP.md` · `OPERATIONS.md`（真机手册）· `TEST_PLAN.md`（分步测试）· `SCREENSHOTS.md` · `CHANGELOG.md` · `deploy/`（systemd）。
 
 ---
-最后更新：2026-09-06 07:30（第二夜收尾）。
+最后更新：2026-09-07 16:10（同步上游 6167083 后）。

@@ -1,5 +1,11 @@
 # 变更记录
 
+## [0.4.1] - 2026-09-07
+- 同步上游 `Sample_web_api@6167083` 的 SDK（透传通道 429/网络重试、`device_start|stop`/`localize` 自动幂等键、`events(limit=)`、`watch_task` idle 宽限）；包装层去掉重复的 429 重试
+- **修 T26**：`/position` 200 不代表定位新鲜（机器人端停发话题后云端回放缓存值）——定位就绪改为要求 `received_at` 新鲜，前置检查明确报「定位数据已陈旧 N 小时」
+- mock 新增 `freeze_telemetry`（陈旧遥测）与 `robot_version`（legacy/new：Location 0/1、estop 缺 active 400）注入
+- 宪法 C3/C9/C11 按上游「新旧机器人端双轨」更新；107 用例
+
 ## [0.4.0] - 2026-09-06 07:30（真机联调版）
 - 真机（Gazebo 经真实云端）跑通全流程；通宵每 10 分钟一趟四点巡检零失败
 - schema v6：云端事件唯一性按 (gateway, cloud_seq)——修复 mock→真机切换后真机事件静默丢失（T23）

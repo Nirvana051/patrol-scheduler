@@ -188,10 +188,11 @@ class RobotClient:
         急停：让机器人持续收到停止指令直到你显式取消。
         不需要控制权租约（安全动作不该排队），但仍需 operator 权限。
 
-        请求体**必须**带 `active: true`。机器人端是
-        `active = bool(payload.get("active", False))` ——
-        发空体 `{}` 会被解读为 active=False，也就是**取消急停**，
-        与调用者的意图正好相反。
+        请求体**必须**带布尔的 `active: true`。历史版本的机器人端是
+        `active = bool(payload.get("active", False))` —— 空体 `{}` 会被解读为
+        active=False，也就是**取消急停**，与调用者的意图正好相反。
+        新版机器人端已修复为：active 缺失或非布尔直接 400 拒绝。
+        无论对着哪个版本，显式传 active 都是唯一正确的用法。
         """
         return self._data(self._request(
             'POST', '/estop', {'active': True},
@@ -230,6 +231,11 @@ class RobotClient:
           「机器人不在线」——很容易误判成机器人真的掉线了。这里自动用 robot_id。
         * **不是冻结契约**。/v1 那 9 条路径是对外承诺、内部怎么改都不动；
           这里是机器人 Flask 的原始路径，随版本可能变。能用 /v1 就别用这条。
+
+        重试策略与 _request 对齐（429 按 Retry-After 退避；网络抖动线性退避），
+        但**写操作只有带了幂等键才重试**：网关对透传写同样支持 Idempotency-Key
+        重放（与 /v1 同一套语义）；不带键就重发，超时后的重试可能把
+        device/start 这类脚本启动两次。
         """
         url = (f'{self.base}/api/robots/{urllib.parse.quote(self.robot_id)}'
                f'/api{path}')
@@ -239,28 +245,48 @@ class RobotClient:
             headers['Content-Type'] = 'application/json'
         if idempotency_key:
             headers['Idempotency-Key'] = idempotency_key
-        req = urllib.request.Request(url, data=body, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout,
-                                        context=self._ctx) as r:
-                raw = r.read().decode('utf-8', 'replace')
-                return json.loads(raw) if raw else {}
-        except urllib.error.HTTPError as e:
-            raw = e.read().decode('utf-8', 'replace')
+        retry_safe = method in ('GET', 'HEAD') or bool(idempotency_key)
+
+        last_err: Exception | None = None
+        for attempt in range(self.max_retries):
+            req = urllib.request.Request(url, data=body, method=method, headers=headers)
             try:
-                parsed = json.loads(raw)
-            except Exception:
-                parsed = raw
-            msg = parsed.get('error') or parsed.get('message') \
-                if isinstance(parsed, dict) else str(parsed)
-            raise RobotError(f'{method} {path} 失败 [{e.code}]: {msg}', e.code, parsed)
-        except urllib.error.URLError as e:
-            raise RobotError(f'{method} {path} 网络失败: {e}', 0, None)
+                with urllib.request.urlopen(req, timeout=timeout or self.timeout,
+                                            context=self._ctx) as r:
+                    raw = r.read().decode('utf-8', 'replace')
+                    return json.loads(raw) if raw else {}
+            except urllib.error.HTTPError as e:
+                raw = e.read().decode('utf-8', 'replace')
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = raw
+                if e.code == 429 and attempt < self.max_retries - 1:
+                    # 限流发生在网关转发之前，重试永远安全（与写操作是否幂等无关）
+                    wait = float(e.headers.get('Retry-After') or 1.0)
+                    time.sleep(min(wait, 10.0))
+                    last_err = e
+                    continue
+                msg = parsed.get('error') or parsed.get('message') \
+                    if isinstance(parsed, dict) else str(parsed)
+                raise RobotError(f'{method} {path} 失败 [{e.code}]: {msg}', e.code, parsed)
+            except urllib.error.URLError as e:
+                last_err = e
+                if retry_safe and attempt < self.max_retries - 1:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise RobotError(f'{method} {path} 网络失败: {e}', 0, None)
+        raise RobotError(f'{method} {path} 重试耗尽: {last_err}', 0, None)
 
     # ── 系统初始化 / 收尾（都在透传通道上）───────────────────────────────────
-    def device_start(self) -> str:
-        """启动设备（导航等脚本）。返回 task_id，用它轮询启动状态。"""
-        r = self._passthrough('POST', '/device/start')
+    def device_start(self, *, idempotency_key: str | None = None) -> str:
+        """启动设备（导航等脚本）。返回 task_id，用它轮询启动状态。
+
+        自动带幂等键：这是全 API 里重复执行代价最大的调用之一 ——
+        超时重发一次 = 启动脚本跑两遍。网关会用同一个键重放首次响应。
+        """
+        r = self._passthrough('POST', '/device/start',
+                              idempotency_key=idempotency_key or f'devstart-{uuid.uuid4().hex[:16]}')
         if not r.get('success'):
             raise RobotError(f"设备启动失败: {r.get('message')}", 0, r)
         return r.get('task_id', '')
@@ -268,8 +294,9 @@ class RobotClient:
     def device_start_status(self, task_id: str) -> dict:
         return self._passthrough('GET', f'/device/start_status?task_id={urllib.parse.quote(task_id)}')
 
-    def device_stop(self) -> str:
-        r = self._passthrough('POST', '/device/stop')
+    def device_stop(self, *, idempotency_key: str | None = None) -> str:
+        r = self._passthrough('POST', '/device/stop',
+                              idempotency_key=idempotency_key or f'devstop-{uuid.uuid4().hex[:16]}')
         return r.get('task_id', '')
 
     def device_stop_status(self, task_id: str) -> dict:
@@ -330,7 +357,10 @@ class RobotClient:
         payload: dict = {'map_name': map_name, 'node_id': node_id}
         if pose is not None:
             payload['pose'] = pose
-        r = self._passthrough('POST', '/localization/execute', payload, timeout=timeout)
+        # 带幂等键：这是个最长 20s 的同步阻塞调用，客户端超时后重试是常态；
+        # 有键时网关重放首次结果，不会让机器人重新收敛一遍。
+        r = self._passthrough('POST', '/localization/execute', payload, timeout=timeout,
+                              idempotency_key=f'loc-{uuid.uuid4().hex[:16]}')
         if not r.get('success'):
             # reason=timeout（定位模块没起来/点云对不上）还是
             # reason=drift_exceeded（node_id 给错了），失败原因差别很大
@@ -346,9 +376,19 @@ class RobotClient:
 
         since 省略时只从当下开始（不倒带历史），先记下返回的 seq，
         之后每次带上 nextSince 就能保证一条不漏。
+
+        limit 在客户端截断（服务端暂不支持该参数；此前它是个死参数）：
+        截断时 nextSince 会回拨到截断处，下一轮从那里续读，一条不漏。
         """
         q = f'?since={int(since)}' if since is not None else ''
-        return self._data(self._request('GET', f'/events{q}')) or {}
+        d = self._data(self._request('GET', f'/events{q}')) or {}
+        evs = d.get('events') or []
+        if limit and len(evs) > limit:
+            evs = evs[:limit]
+            d = dict(d)
+            d['events'] = evs
+            d['nextSince'] = int(evs[-1].get('seq') or 0)
+        return d
 
     def watch_events(self, *, since: int | None = None, interval: float = 1.0,
                      timeout: float | None = None,
@@ -450,13 +490,24 @@ class RobotClient:
         云端现在会在响应里直接给 `terminal` / `active` 布尔字段（由状态码算出），
         有就优先用它 —— 这样连状态词集合都不必自己维护。老网关没有这个字段时
         回落到 TERMINAL_STATUS。
+
+        竞态提醒：刚 POST /task 之后执行器要过一两拍才把状态推进到
+        nav_preprocess/navigating，期间读回的仍是 idle。任务没有 ID，无法区分
+        「还没开始」与「早就结束」，所以这里给一个宽限：开头连读到的 idle
+        在 grace 秒内不当作终止态。其余终止态（completed/paused）立即生效。
         """
         t0 = time.time()
+        grace = 10.0
+        seen_active = False
         while time.time() - t0 < timeout:
             st = self.task()
             yield st
+            status = st.get('status')
+            if status in ACTIVE_STATUS:
+                seen_active = True
             done = st.get('terminal')
-            if done if isinstance(done, bool) else (st.get('status') in TERMINAL_STATUS):
+            done = done if isinstance(done, bool) else (status in TERMINAL_STATUS)
+            if done and (status != 'idle' or seen_active or time.time() - t0 >= grace):
                 return
             time.sleep(interval)
         raise RobotError(f'等待任务结束超时（{timeout}s）')

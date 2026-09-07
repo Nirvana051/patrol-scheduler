@@ -26,15 +26,15 @@
 |------|------|------|-----------------|
 | C1 | 日常读写只走 `/v1/robots/{别名}/…`（冻结契约，认别名）；透传通道 `/api/robots/{机器人ID}/api/…` **只认机器人 ID**，传别名得到误导性的 502 | README §2.2 | 复用 SDK `certaintyx.py`（原样拷贝），透传由 `RobotClient._passthrough` 自动用缓存的 `robotId` |
 | C2 | 写操作需要控制权；用 `auto` 模式密钥，停止写入 30s 后自然释放；现场人可抢走控制权（409），程序抢不回来 | README §2.3 | 不做后台续期；409 视为正常，UI 提示「现场有人操作」；执行器按任务选项等待 `lease_retry_seconds` 重试 `lease_retries` 次，仍不行判段失败；前置检查发现控制权被人持有时直接拒绝执行 |
-| C3 | 写操作必须带 `Idempotency-Key`，**重试时复用同一个键**；有意的重新下发（新一次尝试）才换新键；键在 10 分钟内**全局**不能重复，否则云端只回放不执行 | README §2.4 | 分段任务键 `ps-{instance}-r{run}-l{leg}-a{attempt}`（`instance` 为每个 DB 生成一次的随机段，避免换库/多套部署撞键 —— mock 测试实际抓到过这个 bug）；同一 attempt 内 SDK 自动复用 |
+| C3 | 写操作必须带 `Idempotency-Key`，**重试时复用同一个键**；有意的重新下发（新一次尝试）才换新键；键在 10 分钟内**全局**不能重复，否则云端只回放不执行 | README §2.4 | 分段任务键 `ps-{instance}-r{run}-l{leg}-a{attempt}`（`instance` 为每个 DB 生成一次的随机段，避免换库/多套部署撞键 —— mock 测试实际抓到过这个 bug）；同一 attempt 内 SDK 自动复用。**上游 6167083（2026-09-06）起透传通道也支持幂等键**，SDK 自动为 `device/start|stop`、`localization/execute` 生成 |
 | C4 | 限流 5 rps，429 按 `Retry-After` 退避；轮询间隔不小于 1s；要到达通知用事件流，不轮询 | README §2.5 | 全局令牌桶限速（4 rps）；状态轮询 ≥2s；到达用 SSE `events?stream=1`，`since` 游标续接 |
 | C5 | 状态词写读不对称：写 `running` 读回 `navigating`，失败读回 `paused`；判断用响应里的 `active`/`terminal` 布尔或 SDK 的集合 | api-reference「任务状态词」 | 执行器只用 `terminal`/`active`/`status_code`，永不 `== 'running'` |
 | C6 | `error_code` 与 `status` 正交；255 既是暂停也是失败，看 `error_code` 区分 | status.md | 结束判定：`status_code==4` 完成；`255` 看 `error_hex` |
 | C7 | 不要在代码里抄状态码表，用 `GET /v1/status-codes` 或响应里的 `*_name/*_text` 字段 | README §2.6 | 前端展示只用云端附带的语义字段；mock 网关直接回放真实抓取的表 |
 | C8 | 只下发任务机器人不会动：真机必须先 ② 启动设备 → ③ 等启动 → ④ 定位（`node_id` 必须是机器人**真实所在**航点，客户端超时 ≥60s）→ ⑤ 确认 `/position` 200 | full-patrol.md | 「机器人初始化」面板显式提供这三步；执行前置检查要求定位就绪，否则拒绝执行并给出原因 |
-| C9 | 判断定位就绪**不能**用 `/perception.Location`（恒为 1）；用 `telemetry.global_localization.received_at`（Unix 秒）新鲜度或 `/position` 是否 200 | api-reference「判断定位是否就绪」 | `StatusPoller` 计算 `loc_age`，就绪 = `received && age<5s`；`Location`/`location_valid` 仅展示不判断 |
+| C9 | 判断定位就绪**不能**用 `/perception.Location`（旧版机器人端恒为 1；2026-09-06 起的新版才如实给 0，但不能假设对面是哪个版本）。用 `telemetry.global_localization.received_at` 新鲜度；**`/position` 200 也不够** —— 机器人端停止发布该话题后云端会一直回放缓存值（2026-09-07 真机实测：位姿冻结在 20 小时前、`/position` 仍 200） | api-reference「判断定位是否就绪」+ 真机实测 | `StatusPoller`：有遥测时 就绪 = `received && age<5s && /position 非 503`，并标 `localization_stale`；拿不到遥测才退回 `/position`；`Location` 仅展示 |
 | C10 | 事件游标必须在**下发之前**取，否则漏掉起点的 `waypoint_reached`；用服务端 `nextSince` 续接；云端只留 500 条内存，不持久 | full-patrol ⑦、arrival-events | 每段下发前记录 `cursor=events().seq`；常驻监听线程把所有事件落库（`events` 表）；每 5s 用 `GET /task` 对账兜底 |
-| C11 | 急停请求体必须显式 `{"active": true}`；空体等于取消急停；急停不是硬件急停也不是锁 | api-reference POST /estop | 只经 SDK `estop()/clear_estop()`；UI 大红按钮二次确认；文案明确「非硬件急停」 |
+| C11 | 急停请求体必须显式布尔 `{"active": true}`；旧版机器人端把空体当「取消急停」，2026-09-06 起的新版直接 400；急停不是硬件急停也不是锁，实测还有 5–7 s 滑行 | api-reference POST /estop | 只经 SDK `estop()/clear_estop()`；UI 大红按钮二次确认；文案明确「非硬件急停」 |
 | C12 | 抓帧必须 `-rtsp_transport tcp`；全景是 2:1 等距投影，分辨率别写死；`rtspPath` 从概览接口读 | video.md | `RtspFfmpegSource` 固定 TCP；分辨率从抓到的图读；`rtspPath` 来自 `info()` |
 | C13 | 密钥不进前端、不进仓库；用别名不用机器人 ID 做地址；地图名带时间戳不硬编码 | README §5 | 密钥只存服务端 `config/.env`（gitignored），`/api/settings` 返回掩码；地图名总是从 `/maps` 选 |
 | C14 | 停任务不等于停设备；收尾 = 停任务 → 停设备 → 等停完；②–④ 是一次性初始化，之后重复 ⑥⑦ 即可 | full-patrol ⑧ | 执行结束默认**不停设备**（连续多任务）；「结束作业」按钮才做完整收尾 |
@@ -94,7 +94,8 @@ certaintyX 云端网关  ──隧道──▶ 机器狗          ← 开发/测
 - 端点与响应形状与 `api-reference.md` 一致（信封、字段名、嵌套层数）；`/v1/status-codes` 回放 2026-09-03 从生产抓取的真实 JSON。
 - 行为复刻：状态词不对称（写 running 读 navigating，失败读 paused）；`Location` 恒为 1；未定位时 `/position` 503；透传传别名 → 502「机器人不在线」；缺 `active` 的急停体 = 取消急停；同键重放 + `Idempotent-Replay: true`；5 rps 限流 429 + `Retry-After`；未知 `task_id` → 400。
 - 机器人运动学仿真：下发后先 `nav_preprocess`（status 2，`MOCK_PREPROCESS` 秒）再 `navigating`，沿 path 匀速运动（`MOCK_SPEED`，默认 1 m/s，可加速），`visited` 下发瞬间含起点，逐点产生 `waypoint_reached`（含 `index/total/nextTarget`），结束 `task_completed`；`events` 500 条环形缓冲 + `since` + `stream=1` SSE（心跳注释帧、`Last-Event-ID`）。
-- 故障注入 `/mock/*`：下一段避障/规划失败（`task_failed` 0x234B/0x234C）、掉线、`ros_available=false`、现场抢控制权（`preempt`，复刻「人可抢程序、程序抢不了人」）、持续避障（停滞）、丢定位、丢事件（测对账）、传送、复位、调速。
+- 机器人端版本：`/mock/robot-version`（`legacy` 默认，与现场那台一致 —— Location 恒 1、estop 空体当 false；`new` = 2026-09-06 起已修复：Location 如实 0、estop 缺 active 返回 400）。
+- 故障注入 `/mock/*`：冻结遥测（`freeze_telemetry`，模拟机器人端停发 /global_localization 而 /position 仍回放缓存）、停止指令被忽略（`ignore_stop`）、nginx 版 HTML 502、下一段避障/规划失败（`task_failed` 0x234B/0x234C）、掉线、`ros_available=false`、现场抢控制权（`preempt`，复刻「人可抢程序、程序抢不了人」）、持续避障（停滞）、丢定位、丢事件（测对账）、传送、复位、调速。
 - 演示地图：`fixtures/map_demo.json`，~40 个航点的环路 + 支路，编号相邻的点相距 0.5–3 m（贴近真实 87 点地图的密度）。
 
 ---
@@ -264,6 +265,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 - 02:30 定时计划（schema v3）；02:55 人工改判（schema v4）、失败通知 webhook、CSV 导出；03:10 执行器复审；02:03 起通宵定时执行观察。
 - 02:20 VLM 评测脚本（人工复核当标注）、导出/导入、重建图重定向。
 - 04:47 通宵观察抓到 edge-tts 卡死执行的 bug（T21）→ 合成超时 + 启动对账残留执行；04:53 重启后 50 趟连续完成，零告警。
+- 09-07 16:00 拉取上游 `6167083`（SDK 加固 + 文档双轨）：同步 vendored SDK、去掉包装层重复的 429 重试；据此更新 C3/C9/C11；发现并修掉 T26（陈旧定位误判）。现场那台机器人仍是 **legacy 版**（Location 恒 1）。
 - 07:26 观察收束：104 趟 / 103 完成 / 1 中止；`v0.2.2`。
 - 09-05 21:15 第一次真机（Gazebo）执行成功；21:17 四点巡检 4 分钟完成；21:26 演练暴露 T22（机器人不理会停止）与 T23（真机事件撞号丢失）；21:50 演练 D 暴露 T24 并修复；22:00 起通宵计划；23:25–23:38 停止/急停探针。
 
@@ -286,6 +288,8 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | T9 | 巡检途中丢定位 | 需人工重新定位 | 已做：默认策略「停下并暂停」，提示用当前最近航点重新定位后点继续，恢复后从当前位置重规划该段；真机验证提示时机与恢复流程 |
 
 | T22 | **机器人端间歇性不理会 `DELETE /task`**（09-05 Gazebo 实测 9 次停止 4 次被忽略：云端回 200「任务已停止」但机器人走到终点才停；其余 1 s 内 `task_stopped`） | 「中止 / 跳过 / 停任务」并不能让机器人停下；只能靠急停或等它走完 | 已做：停任务后核实 `/task` 真的 terminal（`stop_wait_seconds`），核实不了记 error 事件 + 通知，可选自动软件急停（`estop_if_stop_unconfirmed`）；mock 加 `ignore_stop` 复现。实测软件急停 5–7 s 后才停住（Gazebo），且不取消云端任务、取消急停后继续走。**真狗上必须重测**停止指令的忽略率与急停滑行距离 |
+
+| T26 | **`/position` 200 不代表定位新鲜**：机器人端停发 `/global_localization` 后云端回放缓存值（2026-09-07 现场：位姿冻结 20 小时、仍 200），我们原先 `position_ready OR fresh` 会误判就绪 | 会在机器人「其实不知道自己在哪」时放行执行 | **已修**：改为「有遥测则要求新鲜且 /position 非 503」，前置检查明确写出「定位数据已陈旧 N 小时」；mock 加 `freeze_telemetry` 注入 + 用例 |
 
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |

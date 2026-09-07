@@ -115,7 +115,17 @@ class StatusPoller(threading.Thread):
                     snap['errors'].append(f'perception: {e}')
             else:
                 snap['perception'] = prev.get('perception')
-        snap['localized'] = bool(snap.get('position_ready')) or bool((snap.get('localization') or {}).get('fresh'))
+        # 定位是否就绪（C9）：`/position` 返回 200 **不代表数据新鲜** —— 机器人端停止发布
+        # /global_localization 后，云端会一直回放最后一次缓存值（2026-09-07 真机实测：
+        # 位姿冻结在 20 小时前的坐标，/position 仍 200）。所以有遥测时以 received_at 新鲜度为准，
+        # 只有拿不到遥测时才退回「/position 通不通」。
+        loc = snap.get('localization') or {}
+        if loc.get('received'):
+            snap['localized'] = bool(loc.get('fresh')) and snap.get('position_ready') is not False
+            snap['localization_stale'] = not bool(loc.get('fresh'))
+        else:
+            snap['localized'] = bool(snap.get('position_ready'))
+            snap['localization_stale'] = False
         snap['rate_limiter_total'] = g.limiter.total
         self._publish(snap)
         return snap

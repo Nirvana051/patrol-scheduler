@@ -70,23 +70,15 @@ class RobotGateway:
             return attr
 
         def wrapped(*a, **kw):
-            # SDK 的 /v1 请求自带 429 退避，透传通道（device/localize 等）没有；这里统一兜一层：429 按 Retry-After 退避后再试一次
-            for attempt in range(3):
-                self.limiter.acquire()
-                try:
-                    return attr(*a, **kw)
-                except RobotError as e:
-                    if e.status != 429 or attempt == 2:
-                        if '<' in str(e) and '>' in str(e):
-                            raise RobotError(clean_error_text(str(e)), e.status, e.body) from e
-                        raise
-                    wait = 1.0
-                    body = e.body if isinstance(e.body, dict) else {}
-                    try:
-                        wait = float(body.get('retry_after') or 1.0)
-                    except (TypeError, ValueError):
-                        pass
-                    time.sleep(min(wait, 5.0) * (attempt + 1))
+            # 限流与重试都在 SDK 里（上游 6167083 起 /v1 与透传通道都按 Retry-After 退避）：
+            # 这里只做两件事 —— 先拿全局令牌（多线程共用 5 rps 预算），以及把网关偶发的整页 HTML 错误压成一行
+            self.limiter.acquire()
+            try:
+                return attr(*a, **kw)
+            except RobotError as e:
+                if '<' in str(e) and '>' in str(e):
+                    raise RobotError(clean_error_text(str(e)), e.status, e.body) from e
+                raise
         wrapped.__name__ = name
         return wrapped
 

@@ -98,7 +98,7 @@ python3 ../Sample_web_api/examples/python/04_verify_flow.py --robot ntu-dog-0000
 | 抓不到帧、不报错 | 事件 `snapshot_failed` | 见 video.md：先浏览器开 HLS；RTSP 必须 TCP（系统已固定） |
 | 一切正常但数据不变 | 总览「ROS 不可用」 | 机器人端 ROS 挂了，读到的都是陈旧值 |
 | 我的写操作 409 | 顶栏「控制权：xxx」 | 现场有人接管；等对方放手 |
-| 定位灯一直灰 | 总览定位卡片 | 未初始化；不要看 perception.Location |
+| 定位灯一直灰 | 总览定位卡片 | 未初始化；或**定位数据陈旧**（机器人端/仿真停了，`/position` 仍回放缓存值）——前置检查会写明「定位数据已陈旧 N 小时」；不要看 perception.Location |
 | 事件里偶见 `reconcile_failed … 502 Bad Gateway` | 任务事件 | 云端 nginx 层偶发 HTML 502，下一次对账即恢复；连续超过 `offline_timeout` 才判段失败 |
 
 日志：`data/logs/app.log`；事件：网页「任务事件」（云端事件只在内存留 500 条，这里才是持久记录）。

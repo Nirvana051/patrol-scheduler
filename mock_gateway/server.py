@@ -301,7 +301,9 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
                 return g
             if not robot.online:
                 return fail(502, '机器人不在线')
-            active = bool(body.get('active', False))               # 机器人端就是这么读的：空体 = 取消急停
+            if robot.robot_version == 'new' and not isinstance(body.get('active'), bool):
+                return fail(400, '急停请求必须携带布尔字段 "active"')   # 2026-09-06 起的机器人端不再猜默认值
+            active = bool(body.get('active', False))               # legacy 机器人端就是这么读的：空体 = 取消急停
             return ok(robot.set_estop(active))
         return idempotent(request, info, do)
 
@@ -407,6 +409,14 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
     @app.post('/mock/fault')
     async def mock_fault(request: Request):
         b = await body_json(request)
+        if b.get('kind') == 'freeze_telemetry':
+            with robot.lock:
+                robot.freeze_telemetry_at = float(b.get('at') or time.time()) if b.get('on', True) else 0.0
+            return {'ok': True, 'freeze_telemetry_at': robot.freeze_telemetry_at}
+        if b.get('kind') == 'robot_version':
+            with robot.lock:
+                robot.robot_version = 'new' if b.get('version') == 'new' else 'legacy'
+            return {'ok': True, 'robot_version': robot.robot_version}
         if b.get('kind') == 'ignore_stop':
             with robot.lock:
                 robot.ignore_stop = bool(b.get('on', True))
