@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import time
@@ -136,7 +137,9 @@ def build_provider(cfg) -> VlmProvider:
     p = (cfg.get('VLM_PROVIDER') or 'mock').lower()
     if p == 'qwen':
         from .openai_compat import QwenVlm
-        return QwenVlm(cfg.get('VLM_BASE_URL'), cfg.get('VLM_MODEL'), cfg.get('VLM_API_KEY'),
+        # 密钥优先用 VLM_API_KEY；为空时回落到 DASHSCOPE_API_KEY —— 阿里官方示例就是读这个环境变量
+        key = cfg.get('VLM_API_KEY') or os.environ.get('DASHSCOPE_API_KEY') or ''
+        return QwenVlm(cfg.get('VLM_BASE_URL'), cfg.get('VLM_MODEL'), key,
                        timeout=cfg.get_float('VLM_TIMEOUT'), extra_body=_extra_body(cfg))
     if p == 'openai_compat':
         from .openai_compat import OpenAICompatVlm

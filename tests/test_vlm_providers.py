@@ -194,3 +194,17 @@ def test_openai_compat_surfaces_server_error_message():
         assert _json.loads(r.raw)['error']['code'] == 'InvalidParameter'
     finally:
         server.should_exit = True
+
+
+def test_qwen_key_falls_back_to_dashscope_env(tmp_path, monkeypatch):
+    """VLM_API_KEY 留空时用 DASHSCOPE_API_KEY —— 与阿里官方示例同一个约定。"""
+    from app.config import Config
+    from app.vlm.base import build_provider
+    monkeypatch.setenv('VLM_PROVIDER', 'qwen')
+    monkeypatch.setenv('VLM_MODEL', 'qwen3.5-flash')
+    monkeypatch.setenv('VLM_BASE_URL', '')
+    monkeypatch.setenv('VLM_API_KEY', '')
+    monkeypatch.setenv('DASHSCOPE_API_KEY', 'sk-from-env')
+    assert build_provider(Config(env_file=tmp_path / 'no.env')).api_key == 'sk-from-env'
+    monkeypatch.setenv('VLM_API_KEY', 'sk-explicit')
+    assert build_provider(Config(env_file=tmp_path / 'no.env')).api_key == 'sk-explicit'   # 显式配置优先

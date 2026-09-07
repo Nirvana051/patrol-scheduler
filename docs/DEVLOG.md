@@ -262,3 +262,9 @@
 - 定位：TTS 合成放在 `ThreadPoolExecutor` 里，它的工作线程是**非守护**的 —— 解释器退出时 `atexit` 会 join 它们。合成一卡（edge-tts 真的会卡，T21），进程就退不掉（最小复现：卡住的池任务让进程 25 s 仍未退出）。调用方那层 `fut.result(timeout=)` 只让调用方返回，卡住的工作线程还在。
 - 修法：改成每次合成起一个**守护线程** + `join(timeout)`，超时就把它丢下（守护线程不阻塞退出）。隔离实例实测：故意让合成卡死后 SIGTERM，**0.26 s 干净退出**（修复前 30 s+ 被强杀）。
 - 顺带发现（未改，仅记录）：`settings` 表里的 `CX_*` 优先级高于 `config/.env`，所以 `start.sh --mock` 导出的 mock 环境变量会被库里存的 `CX_ROBOT` 覆盖 —— 现在库里存的是 `fulin-factory-car`，`--mock` 会连着 mock 网关却去找这台机器人（事件流连不上）。真要用 mock，临时指定另一个库：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`。
+
+## 09-07 20:35 qwen3.5-flash 配置就位（等密钥）
+- 用户贴的官方示例是流式 + `enable_thinking=True`；我们的判读是一次性非流式，所以 `QwenVlm` 固定 `enable_thinking: false`（DashScope 对推理型模型的非流式调用要求该参数存在且为 false）。
+- `config/.env` 的 VLM 段已配成 `VLM_PROVIDER=qwen` / `VLM_MODEL=qwen3.5-flash` / `VLM_BASE_URL=`（留空走 DashScope 兼容模式地址），密钥留空等粘贴。
+- 新增：`VLM_API_KEY` 为空时回落到 `DASHSCOPE_API_KEY` 环境变量（与官方示例同一约定）。
+- 用假密钥探过一次：请求确实打到 DashScope 并拿回它的鉴权错误，说明地址/请求体/参数这条链是通的，只差真密钥。
