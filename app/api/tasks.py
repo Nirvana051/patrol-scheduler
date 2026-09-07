@@ -2,6 +2,8 @@
 """任务规划：任务 CRUD、路线预览、执行。"""
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -100,14 +102,29 @@ def plan(task_id: int, request: Request, from_node: str | None = None):
     if g is None:
         raise bad_request(f"地图 {t['map_name']} 尚未同步导航航点")
     start, start_note = from_node, None
-    if not start:
+    declared = t['options'].get('start_node')
+    declared = str(declared) if declared not in (None, '') else None
+    if start:
+        start_note = f'按本次预览指定的起点 {start}'
+    elif declared:
+        start = declared
+        start_note = f'任务指定的起始航点 {start}'
+        if declared not in g:
+            start_note += '（⚠️ 该航点不在当前地图里，请在任务里重选）'
+        else:
+            pos = (c.status.get().get('position') or {})
+            if pos.get('x') is not None:
+                node = g.nodes[declared]
+                d = math.hypot(float(pos['x']) - node['x'], float(pos['y']) - node['y'])
+                start_note += f'；机器人当前距它 {d:.2f} m'
+    else:
         pos = (c.status.get().get('position') or {})
         if pos.get('x') is not None:
             start, d = g.nearest(float(pos['x']), float(pos['y']))
-            start_note = f'按当前位置取最近航点 {start}（{d:.2f} m）'
+            start_note = f'未指定起点，按当前位置取最近航点 {start}（{d:.2f} m）'
         elif t['items']:
             start = t['items'][0].get('nav_node_id')
-            start_note = f'读不到位置，假定从首个任务航点 {start} 出发'
+            start_note = f'未指定起点且读不到位置，假定从首个任务航点 {start} 出发'
     legs, cur, total = [], start, 0.0
     for it in t['items']:
         if not it['enabled']:

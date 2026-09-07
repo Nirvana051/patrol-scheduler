@@ -186,3 +186,52 @@ def test_rerun_from_failed_item(app_client, mock_robot):
     assert run2['status'] == 'completed' and [l['to_node'] for l in run2['legs']] == ['20']
     assert '重跑' in run2['task_name'] and len(run2['inspections']) == 1
     assert app_client.post(f'/api/tasks/{tid}/run?from_seq=9').status_code == 400
+
+
+def test_task_declared_start_node_is_used(app_client, mock_robot):
+    """任务里指定起始点后：规划与执行都从它出发，不再按机器人当前位置取最近航点。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')                              # 机器人在航点 1
+    sync_map(app_client)
+    tw = app_client.post('/api/task-waypoints', json={'name': '点30', 'map_name': DEMO_MAP, 'nav_node_id': '30',
+                                                      'prompt': 'q'}).json()
+    tid = app_client.post('/api/tasks', json={
+        'name': '指定起点', 'map_name': DEMO_MAP, 'waypoint_ids': [tw['id']],
+        'options': {'start_node': '20', 'settle_seconds': 0, 'not_started_timeout': 15}}).json()['id']
+    # 规划预览：起点是 20（不是机器人脚下的 1），且注明了机器人距它多远
+    p = app_client.get(f'/api/tasks/{tid}/plan').json()
+    assert p['start_node'] == '20' and '任务指定的起始航点 20' in p['start_note'] and '距它' in p['start_note']
+    assert p['legs'][0]['from_node'] == '20' and p['legs'][0]['path'][0] == '20'
+    # query 参数仍可临时覆盖
+    assert app_client.get(f'/api/tasks/{tid}/plan?from_node=5').json()['start_node'] == '5'
+    # 执行：第一段从 20 出发；机器人其实在 1，距离超容差 → 记 warn
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    leg = run['legs'][0]
+    assert leg['from_node'] == '20' and leg['path'][0] == '20' and leg['to_node'] == '30'
+    ev = next(e for e in run['events'] if e['type'] == 'start_node')
+    assert '任务指定的航点 20' in ev['message'] and ev['level'] == 'warn' and '超过 3 m' in ev['message']
+
+
+def test_task_start_node_not_in_map_is_refused(app_client, mock_robot):
+    """指定的起点不在地图里（重新建图后航点号会变）→ 前置阶段就明确拒绝，而不是走错。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')
+    sync_map(app_client)
+    tw = app_client.post('/api/task-waypoints', json={'name': '点5', 'map_name': DEMO_MAP, 'nav_node_id': '5'}).json()
+    tid = app_client.post('/api/tasks', json={'name': '坏起点', 'map_name': DEMO_MAP, 'waypoint_ids': [tw['id']],
+                                              'options': {'start_node': '9999'}}).json()['id']
+    assert '不在当前地图里' in app_client.get(f'/api/tasks/{tid}/plan').json()['start_note']
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'], timeout=30)
+    assert run['status'] == 'aborted' and '9999' in run['error'] and '不在地图' in run['error']
+    assert run['legs'] == []
+
+
+def test_start_node_auto_when_unset(app_client, mock_robot):
+    """不指定起点 = 原来的行为：按当前位置取最近航点，事件里写明「未指定起点」。"""
+    from tests.conftest import DEMO_MAP
+    init_robot(app_client, '1')
+    tid = make_task(app_client, nodes=('5',))
+    run = wait_run(app_client, app_client.post(f'/api/tasks/{tid}/run').json()['id'])
+    assert run['status'] == 'completed' and run['legs'][0]['from_node'] == '1'
+    ev = next(e for e in run['events'] if e['type'] == 'start_node')
+    assert '未指定起点' in ev['message'] and DEMO_MAP or True

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import math
 import queue
 import threading
 import time
@@ -15,7 +16,9 @@ from app.db import dumps, loads, now_iso
 from app.executor.inspection import run_inspection
 from app.robot.client import RobotError
 
-DEFAULT_OPTIONS = {'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'stop_wait_seconds': 15.0, 'estop_if_stop_unconfirmed': False, 'max_retries': 1,
+DEFAULT_OPTIONS = {'start_node': None,          # 任务的起始导航航点；None = 按机器人当前位置取最近的
+                   'start_node_max_distance': 3.0,   # 指定了起点时，机器人离它超过这么远就只警告（不拦）
+                   'settle_seconds': 2.0, 'leg_timeout': 600.0, 'not_started_timeout': 25.0, 'offline_timeout': 90.0, 'stall_timeout': 180.0, 'lease_retry_seconds': 30.0, 'lease_retries': 1, 'stop_wait_seconds': 15.0, 'estop_if_stop_unconfirmed': False, 'max_retries': 1,
                    'return_to_start': False, 'require_localized': True, 'speed': None, 'gait': None,
                    'obs_mode': None, 'nav_mode': None, 'manner': None, 'stop_on_lost_localization': False,
                    'lost_localization_action': 'pause'}   # continue | pause | fail
@@ -197,16 +200,35 @@ class MissionRunner(threading.Thread):
         if self.graph is None or len(self.graph) == 0:
             raise RunAbort(f"地图 {self.task['map_name']} 的导航航点尚未同步，请先在「地图」页同步")
         pos = pf['status'].get('position')
-        if pos and pos.get('x') is not None:
+        declared = self.opt.get('start_node')
+        declared = str(declared) if declared not in (None, '') else None
+        if declared and declared not in self.graph:
+            raise RunAbort(f'任务指定的起始航点 {declared} 不在地图 {self.task["map_name"]} 里（重新建图后航点号会变，请在任务里重选）')
+
+        if declared:
+            # 由任务指定：不再按位置猜。只核对机器人离它多远 —— 差太多时下发的路径头一个点就不是它脚下，
+            # 机器人要么先自己走过去、要么直接失败，所以这里要显眼地记一笔。
+            self.cur_node = declared
+            if pos and pos.get('x') is not None:
+                node = self.graph.nodes[declared]
+                dist = math.hypot(float(pos['x']) - node['x'], float(pos['y']) - node['y'])
+                limit = float(self.opt.get('start_node_max_distance') or 3.0)
+                self._log('start_node',
+                          f'起点用任务指定的航点 {declared}；机器人当前 ({pos["x"]:.2f}, {pos["y"]:.2f}) 距该航点 {dist:.2f} m'
+                          + (f'（超过 {limit:.0f} m —— 确认机器人真的在这个点附近，否则第一段会走错）' if dist > limit else ''),
+                          level='warn' if dist > limit else 'info')
+            else:
+                self._log('start_node', f'起点用任务指定的航点 {declared}（当前读不到位姿，无法核对距离）', level='warn')
+        elif pos and pos.get('x') is not None:
             nid, dist = self.graph.nearest(float(pos['x']), float(pos['y']))
             self.cur_node = nid
             lvl = 'warn' if dist > 3.0 else 'info'
-            self._log('start_node', f'当前位置 ({pos["x"]:.2f}, {pos["y"]:.2f}) 最近导航航点 {nid}，距 {dist:.2f} m'
+            self._log('start_node', f'未指定起点，按当前位置 ({pos["x"]:.2f}, {pos["y"]:.2f}) 取最近导航航点 {nid}，距 {dist:.2f} m'
                       + ('（超过 3 m，请确认定位）' if dist > 3.0 else ''), level=lvl)
         else:
             first = self.items[0]['tw'].get('nav_node_id') if self.items else None
             self.cur_node = first
-            self._log('start_node', f'读不到位置，假定机器人在首个任务航点 {first}', level='warn')
+            self._log('start_node', f'未指定起点且读不到位置，假定机器人在首个任务航点 {first}', level='warn')
 
     def _plan(self) -> None:
         db = self.ctx.db
