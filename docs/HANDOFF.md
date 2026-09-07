@@ -63,7 +63,7 @@ make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 
 ## 7. 文档索引
 
-`task.md`（总纲）· `DEVLOG.md`（逐时日志）· `TODO.md` · `ROADMAP.md` · `OPERATIONS.md`（真机手册）· `TEST_PLAN.md`（分步测试）· `SCREENSHOTS.md` · `CHANGELOG.md` · `deploy/`（systemd）。
+`USAGE.md`（使用说明，日常操作入口）· `task.md`（总纲）· `DEVLOG.md`（逐时日志）· `TODO.md` · `ROADMAP.md` · `OPERATIONS.md`（真机手册）· `TEST_PLAN.md`（分步测试）· `SCREENSHOTS.md` · `CHANGELOG.md` · `deploy/`（systemd）。
 
 ---
 最后更新：2026-09-07 16:10（同步上游 6167083 后）。

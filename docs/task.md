@@ -249,7 +249,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | P8 真机联调（Gazebo 经真实云端） | 09-05 21:00–23:40 | 同步真实地图、首次真机执行、四点巡检、故障演练（中止/跳过/外部停止/外部任务/急停）、探针 | ✅ 全流程跑通；暴露并修复 T22（机器人间歇性不理会停止，12 次中 4 次）、T23（真机事件撞号丢失）、T24（中途替换任务云端不发 task_started）；急停滑行 5–7 s |
 | P9 真机通宵计划 | 09-05 22:00–09-06 07:25 | 每 10 分钟一趟四点巡检（163 m，4 段 / 4 次检查），后台监控 | ✅ 见 §8 末尾「第二夜结果」 |
 
-**交付物**：`/home/leo/agent/scheduler/`（git，65+ 次提交，tag `v0.1.0` … `v0.4.0`），约 4.4k 行后端 + 1.0k 行 mock + 1.2k 行前端 + 0.25k 行播报服务 + 1.9k 行测试（104 个用例，约 3.5 分钟跑完）+ 0.7k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
+**交付物**：`/home/leo/agent/scheduler/`（git，65+ 次提交，tag `v0.1.0` … `v0.4.0`），约 4.4k 行后端 + 1.0k 行 mock + 1.2k 行前端 + 0.25k 行播报服务 + 1.9k 行测试（104 个用例，约 3.5 分钟跑完）+ 0.7k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/USAGE.md`（使用说明）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
 
 **关键时间线**（细节见 `scheduler/docs/DEVLOG.md`）：
 - 22:05 宪法读完，确认无真机密钥；`GET /v1`、`/v1/status-codes` 免鉴权抓取存为 mock 夹具。
