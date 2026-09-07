@@ -4,7 +4,7 @@
 
 - 只想快速看能不能跑：读 [§1 装与启动](#1-装与启动) → [§2 五分钟先在仿真里跑一遍](#2-五分钟先在仿真里跑一遍)。
 - 要接真机上线：读 [§3 接真机](#3-接真机)，安全细则在 [OPERATIONS.md](OPERATIONS.md)。
-- 逐步验收清单在 [TEST_PLAN.md](TEST_PLAN.md)；设计与问题清单在 [task.md](task.md)。
+- 逐步验收清单在 [TEST_PLAN.md](TEST_PLAN.md)；设计与问题清单在 [task.md](task.md)；全部文档的导航在 [README.md](README.md)。
 
 ---
 

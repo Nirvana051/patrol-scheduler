@@ -12,7 +12,7 @@
 6. 守护与运维：systemd 单元、自动清理 cron、日志轮转已就位；健康检查接入监控。
 
 **R3 判读质量（并行）**
-7. 真 VLM 评测：`scripts/eval_vlm.py` 已能用人工复核过的检查当标注重跑当前 VLM 算准确率/误判清单；后续：积累样本、对比 provider/prompt/是否附整图。
+7. 真 VLM 评测：通路已就绪（`qwen` = DashScope 兼容模式 + `make vlm` 探针 + `make eval` 用人工复核当标注算准确率/误判清单）。**下一步**：填入 DashScope 密钥实测 `qwen3.5-flash` 能否读图；不行则换 `qwen3-vl-plus`/`qwen-vl-max`；再积累样本对比 prompt/是否附整图。
 8. 等距投影 → 透视重投影（py360convert）再给模型；对比评测。
 9. 结果统计与人工改判已有第一版（按航点通过率、改判入库）；后续：改判样本导出为评测集、误报回看视图。
 

@@ -199,7 +199,8 @@ GET  /api/health
 GET  /api/robot/status                      聚合快照（在线/租约/急停/ROS/定位年龄/位姿/任务语义字段/事件监听状态/进行中执行）
 POST /api/robot/status/refresh              立即刷新一次
 GET  /api/robot/preflight                   执行前置检查（可达/在线/急停/ROS/定位/云端空闲/控制权）
-POST /api/robot/init/device-start|device-stop {wait}   透传 ②/⑧；GET /api/robot/init/device-status?task_id&starting 轮询
+POST /api/robot/init/device-start ; POST /api/robot/init/device-stop {wait}   透传 ②/⑧（共用 roscore 的仿真环境里禁用）
+GET  /api/robot/init/device-status?task_id=&starting=   轮询启停脚本
 POST /api/robot/init/localize {map_name,node_id[,pose]}   透传 ④（C8）
 POST /api/robot/estop {active}              (C11)
 DELETE /api/robot/task                      停止云端任务（不停设备，C14）
@@ -249,7 +250,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 | P8 真机联调（Gazebo 经真实云端） | 09-05 21:00–23:40 | 同步真实地图、首次真机执行、四点巡检、故障演练（中止/跳过/外部停止/外部任务/急停）、探针 | ✅ 全流程跑通；暴露并修复 T22（机器人间歇性不理会停止，12 次中 4 次）、T23（真机事件撞号丢失）、T24（中途替换任务云端不发 task_started）；急停滑行 5–7 s |
 | P9 真机通宵计划 | 09-05 22:00–09-06 07:25 | 每 10 分钟一趟四点巡检（163 m，4 段 / 4 次检查），后台监控 | ✅ 见 §8 末尾「第二夜结果」 |
 
-**交付物**：`/home/leo/agent/scheduler/`（git，65+ 次提交，tag `v0.1.0` … `v0.4.0`），约 4.4k 行后端 + 1.0k 行 mock + 1.2k 行前端 + 0.25k 行播报服务 + 1.9k 行测试（104 个用例，约 3.5 分钟跑完）+ 0.7k 行脚本；文档：本文、`docs/DEVLOG.md`（逐小时开发日志）、`docs/USAGE.md`（使用说明）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
+**交付物**：`/home/leo/agent/scheduler/`（git，76 次提交，tag `v0.1.0` … `v0.4.6`；远端 `github.com/Nirvana051/patrol-scheduler`），约 4.5k 行后端 + 1.1k 行 mock + 1.3k 行前端 + 0.25k 行播报服务 + 2.0k 行测试（**118 个用例**，约 4 分钟跑完）+ 0.8k 行脚本；文档十篇（索引见 `docs/README.md`）：本文（总纲）、`docs/USAGE.md`（使用说明，日常入口）、`docs/HANDOFF.md`（交接/压缩上下文）、`docs/OPERATIONS.md`（真机上线手册）、`docs/TEST_PLAN.md`（验收清单）、`docs/DEVLOG.md`（逐时日志）、`docs/TODO.md`、`docs/ROADMAP.md`、`docs/SCREENSHOTS.md`、`CHANGELOG.md`。
 
 **关键时间线**（细节见 `scheduler/docs/DEVLOG.md`）：
 - 22:05 宪法读完，确认无真机密钥；`GET /v1`、`/v1/status-codes` 免鉴权抓取存为 mock 夹具。
@@ -273,6 +274,22 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 **第二夜结果（09-05 22:00 → 09-06 07:25，真实云端 + Gazebo 机器人）**：每 10 分钟一趟四点巡检，56 趟全部完成、零失败，每趟 ≈243 s（4 段导航 51/36/22/108 s + 4 次检查各 3.1 s）；真机检查累计 233 次无 VLM/TTS 异常；云端事件 8804 条全部落库（`dropped=0`）、SSE 未断；进程 90 → 104 MB（约 +1 MB/h，未平台化前继续观察 → T25）；除演练/探针自己制造的中止外，零告警。
 - 13:56 拿到真机密钥：只读冒烟 8/13 通过（机器人本地服务 8761 未起 → 机器人端接口 502）；RTSP 抓帧实测 3.0 s、HLS 0.8 s；全景当前为 Gazebo 仿真画面（样张 `docs/screenshots/real-pano-sample.jpg`）；系统已切到 REAL 模式运行，演示定时计划已全部停用。演示实例继续运行（每 3 分钟的计划已停用，保留每天 07:30/19:30 的演示计划）。
+
+---
+
+### 第三天（2026-09-07，用户自己在另一台真机上使用 + 我做同步与改进）
+
+| 时间 | 做了什么 | 结果 |
+|------|---------|------|
+| 15:00–17:45 | **用户**在另一台真机上建 33 点新地图、两个任务航点（「这个位置有坐人吗」0–118°、「门有没有打开」167–253°）、做机头校准（`FORWARD_DEG=269.3`）、跑 `lab巡逻` 4 趟 | ✅ 全部完成（判读仍用 mock VLM） |
+| 16:00 | 拉取上游 `6167083`（SDK 透传重试 + 自动幂等键；文档改「新旧机器人端双轨」）→ 同步 vendored SDK、去掉包装层重复的 429 重试、更新宪法 C3/C9/C11 | ✅ `v0.4.1` |
+| 16:05 | 复查上游新写的「定位就绪」时发现 **T26**：`/position` 200 不代表定位新鲜（机器人端停发话题后云端回放缓存值，实测冻结 20 小时仍 200） | ✅ 已修 + mock 加 `freeze_telemetry` |
+| 16:30 | 接入**通义千问**（DashScope 兼容模式）：`qwen` 提供方自动带 `enable_thinking:false`、`VLM_EXTRA_BODY`、`make vlm` 探针 | ✅ `v0.4.2`；等密钥实测 |
+| 20:20 | 发现 `start.sh --stop` 会落到 SIGKILL：TTS 合成在非守护线程里卡住 → 进程 30 s+ 退不掉 → 应用来不及停机器人 | ✅ `v0.4.3` 改守护线程（实测卡死后仍 0.26 s 退出） |
+| 20:45 | **任务起始点**：由任务指定起始导航航点（`options.start_node`），不再按机器人当前位置自动取最近；带距离核对与「不在地图里」拒绝 | ✅ `v0.4.4` |
+| 20:55 | 「改了 UI 看不到」的根因：前端资源没有缓存控制 → 加 `no-cache`，并支持 `#/tasks/<id>` 深链 | ✅ `v0.4.5` |
+| 21:20 | 查清用户反复遇到的「云端有任务在跑：NAVIGATING」= **机器人端重定位期间的任务状态**；顺带发现 **T29**：前置检查失败时我们竟会 `DELETE /task` 停掉不是自己下发的任务 | ✅ `v0.4.6` + 提示可操作化（快捷按钮、执行前预检） |
+| 22:10 | 写 `docs/USAGE.md` 使用说明；刷新 `docs/HANDOFF.md` 与整套文档 | ✅ |
 
 ---
 
@@ -330,7 +347,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 6. 守护与运维：systemd 单元、自动清理 cron、日志轮转已就位；健康检查接入监控。
 
 **R3 判读质量（并行）**
-7. 真 VLM 评测：`scripts/eval_vlm.py` 已能用人工复核过的检查当标注重跑当前 VLM 算准确率/误判清单；后续：积累样本、对比 provider/prompt/是否附整图。
+7. 真 VLM 评测：通路已就绪（`qwen` = DashScope 兼容模式 + `make vlm` 探针 + `make eval` 用人工复核当标注算准确率/误判清单）。**下一步**：填入 DashScope 密钥实测 `qwen3.5-flash` 能否读图；不行则换 `qwen3-vl-plus`/`qwen-vl-max`；再积累样本对比 prompt/是否附整图。
 8. 等距投影 → 透视重投影（py360convert）再给模型；对比评测。
 9. 结果统计与人工改判已有第一版（按航点通过率、改判入库）；后续：改判样本导出为评测集、误报回看视图。
 

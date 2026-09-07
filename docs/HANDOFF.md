@@ -1,69 +1,117 @@
 # 交接文档（HANDOFF）
 
-> 给下一个接手的人（或下一段上下文里的我）：读完这一页就能继续干活。细节见文末索引。最后更新见文末。
+> 给下一个接手的人（或下一段上下文里的我）：读完这一页就能继续干活。
+> 日常怎么用看 [USAGE.md](USAGE.md)；真机安全细则看 [OPERATIONS.md](OPERATIONS.md)；设计与问题清单看 [task.md](task.md)。
+> 最后更新见文末。
 
 ## 1. 这是什么
 
-certaintyX 机器狗云端 API（`https://certaintyx.sg:8443`，教程仓库 `../Sample_web_api`）之上的**本地网页巡检调度台**：
-SQLite 管任务航点/任务/执行/事件；分段下发（机器狗不能在航点暂停）；到点抓全景 → 按角度裁切 → VLM 是/不是 → 答案模版 TTS 播报。
-代码 `/home/leo/agent/scheduler/`（独立 git 仓库，tag 见 `git tag`），主管理文档 `../Sample_web_api/docs/task.md`（未被上游仓库跟踪，`docs/task.md` 是同步副本）。
+certaintyX 机器狗云端 API（`https://certaintyx.sg:8443`，教程仓库 [kafeiyin00/Sample_web_api](https://github.com/kafeiyin00/Sample_web_api)）之上的**本地网页巡检调度台**：
+SQLite 管任务航点/任务/执行/事件；**分段下发**（机器狗不能在航点暂停）；到点抓全景 → 按角度裁切 → VLM 判「是/不是」→ 按答案模版 TTS 播报。
+
+代码 `/home/leo/agent/scheduler/`（git，76 提交，tag `v0.1.0` … `v0.4.6`；远端 `https://github.com/Nirvana051/patrol-scheduler.git`，**尚未推送**——见 §8）。
+主管理文档是 `../Sample_web_api/docs/task.md`（那边未被上游仓库跟踪），`docs/task.md` 是它的同步副本，用 `scripts/sync_task_doc.sh` 同步。
 
 ## 2. 现状（一句话版）
 
-- 真机密钥已到位，存 `config/.env`（gitignored；**别再 `cp config/env.example config/.env`，会覆盖成占位密钥 → 401**）。
-- 别名 `ntu-dog-00001` 后面目前接的是机器人侧的 **Gazebo 仿真**（RTSP 画面是仿真场景）。它与真狗共用 roscore：**绝不要调 `device/start|stop`**（页面「② 启动设备」「停止设备」也别点），会把仿真速度指令接到真狗上 / 杀真机节点。仿真自带定位，`/position` 直接 200，跳过 ②③④ 直接执行即可。
-- 真实地图：`map_20260818_132055`（87 航点）、`map_20260828_230337`。
-- mock 上全流程 + 通宵 104 趟稳定。**真机（Gazebo）上 09-05 夜已跑通完整流程**：四点巡检 4 分钟完成，速度 ≈0.8 m/s，检查 3.6 s/点；演练暴露并修了三件事——T22 机器人间歇性不理会停止指令（现已核实 + 告警）、T23 mock→真机切换后事件撞号丢失（schema v6 按网关唯一）、T24 中途被替换的任务云端不发 `task_started`（改按 `total`/路径比对）。通宵每 10 分钟一趟：09-06 早 56 趟零失败（`docs/DEVLOG.md` 第二夜总结）。真狗上线前必测：停止指令忽略率、急停滑行距离、机头零点、速度。
+- 真机密钥在 `config/.env`（gitignored）。**别再 `cp config/env.example config/.env`** —— 09-04 干过一次，把密钥覆盖成占位符，结果全是 401。
+- **配置优先级：`settings` 表 > `config/.env` > 代码默认值**。用户在网页上改过的项会存进库并盖掉 `.env`；`start.sh --mock` 导出的 mock 环境变量也会被盖掉（T27，变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`）。查当前生效值：`GET /api/settings` 或直接看 `settings` 表。
+- mock 上全流程 + 通宵 104 趟稳定；**真机（Gazebo）09-05 夜跑通完整流程**并通宵 56 趟零失败；09-07 用户自己在另一台真机（工厂/实验室场景，33 点地图）上跑通 `lab巡逻`，机头已校准（`FORWARD_DEG=269.3`）。
+- VLM 通路已就绪（`qwen` = DashScope 兼容模式），**只差 DashScope 密钥**没实测过真判读（T10）。
 
 ## 3. 怎么跑
 
 ```bash
 cd /home/leo/agent/scheduler
 ./start.sh            # 按 config/.env 启动（真机），后台，打开 http://127.0.0.1:8088
-./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统
+./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统，不需要任何凭据
 ./start.sh --audio    # 叠加：本机播报服务 127.0.0.1:5566
 ./start.sh --status | --stop | --restart
-make test             # 97 用例，约 2.5 分钟；make lint
+make test             # 118 用例，约 4 分钟；make lint
 make smoke            # 真机只读冒烟（scripts/real_smoke.py）
+make vlm              # VLM 连通性探针（接新模型先跑这个）
+make seed             # 仿真下灌演示数据并跑一趟
 ```
-日志 `data/logs/app.out`（stdout）与 `data/logs/app.log`（应用日志）；pid `data/run/`。
+
+日志 `data/logs/app.log`（应用）与 `data/logs/app.out`（stdout）；pid 在 `data/run/`；库 `data/scheduler.db`（schema **v6**）。
 
 ## 4. 代码地图（改哪儿）
 
 | 想改 | 看 |
 |------|----|
-| 与云端的调用 / 限速 / 429 | `app/robot/client.py`（只做限速 + HTML 错误清洗；重试都在 SDK 里）。SDK 原样在 `app/vendor/certaintyx.py`，**不要本地改** —— 上游更新时 `cp ../Sample_web_api/examples/python/certaintyx.py app/vendor/` 同步（最近同步：6167083） |
-| 状态灯、定位是否就绪 | `app/robot/status.py`（C9：看 `received_at`，不看 `Location`） |
-| 云端事件监听、游标、落库 | `app/robot/events.py` |
-| 分段执行状态机（下发/到达/失败/重试/暂停/丢定位/外部任务） | `app/executor/runner.py` |
-| 抓图 → 裁切 → VLM → TTS | `app/executor/inspection.py`，`app/media/pano.py`，`app/media/snapshot.py` |
-| VLM / TTS 适配器 | `app/vlm/*`（`QwenVlm` = DashScope 兼容模式，非流式必须带 `enable_thinking:false`），`app/tts/base.py`；扬声器端服务 `audio_server/`。接新 VLM 先跑 `make vlm` 探针 |
-| REST / SSE | `app/api/*.py`，装配在 `app/context.py`，入口 `app/main.py` |
-| 定时计划 | `app/scheduler.py` |
-| 前端 | `web/js/views/*.js`（原生 JS，无构建；`?nosse=1` 静态模式供截图） |
-| mock 云端网关 | `mock_gateway/`（按文档契约仿真 + 故障注入） |
-| 数据库 | `app/schema.sql`（v5）+ `app/db.py` 增量迁移 |
+| 与云端的调用 / 限速 | `app/robot/client.py`（**只做**全局令牌桶 + HTML 错误清洗；重试都在 SDK 里）。SDK 原样在 `app/vendor/certaintyx.py`，**不要本地改** —— 上游更新时 `cp ../Sample_web_api/examples/python/certaintyx.py app/vendor/`（最近同步：`6167083`） |
+| 状态灯、定位是否就绪 | `app/robot/status.py`（C9：只认 `received_at` 新鲜度） |
+| 云端事件监听、游标、落库 | `app/robot/events.py`（唯一性按 `(gateway, cloud_seq)`） |
+| 分段执行状态机 | `app/executor/runner.py`（起点/下发/到达/失败/重试/暂停/丢定位/外部任务/停任务核实） |
+| 抓图 → 裁切 → VLM → TTS | `app/executor/inspection.py`、`app/media/pano.py`、`app/media/snapshot.py` |
+| VLM / TTS 适配器 | `app/vlm/*`（`QwenVlm` = DashScope，非流式必须带 `enable_thinking:false`）、`app/tts/base.py`（合成用**守护线程**，见 §5.4）；扬声器端 `audio_server/` |
+| REST / SSE | `app/api/*.py`，装配在 `app/context.py`，入口 `app/main.py`（含前端 `no-cache`） |
+| 定时计划 | `app/scheduler.py`（daily / interval，不引 cron 库） |
+| 前端 | `web/js/views/*.js`（原生 JS 无构建；`?nosse=1` 静态模式供无头截图；`#/tasks/<id>`、`#/waypoints/<id>` 深链） |
+| mock 云端网关 | `mock_gateway/`（按契约仿真 + 故障注入，见 §6） |
+| 数据库 | `app/schema.sql`（v6）+ `app/db.py` 增量迁移 |
 
-## 5. 必须记住的坑（血泪）
+## 5. 必须记住的坑（血泪，全部真机踩过）
 
-1. 幂等键 10 分钟内全局唯一：换库/重装会撞键 → 云端只回放不执行（键含实例段）；**每次重新下发都要换新键**。
-2. 订阅事件队列、取游标都要在下发**之前**；到达判定不能只靠事件，`GET /task` 对账兜底；要识别「没开始 / 停滞 / 掉线 / 被外部任务替换 / 丢定位」。
-3. 网关重启后事件 seq 归零 → 游标要重置（已做）。
-4. edge-tts 会卡住 → 合成必须带超时（已做）。
-5. 进程重启后残留的「进行中」执行要标为中止（已做）；进程退出前先 DELETE /task（已做）。
-6. `pkill -f` 会匹配到自己的命令行把 shell 杀掉 → 用 `start.sh` / pid 文件。
-7. 测试用例共用一个 mock 机器人：残留执行线程会污染后面的用例（`RunManager.shutdown()`）。
-8. 真实网关 idle 时 `/task` 不带 `progress`；mock 已对齐。
-9. **`/position` 200 不代表定位新鲜**（云端回放缓存值）——定位就绪只认 `received_at` 新鲜度。
-10. 现场那台机器人端是 **2026-09-06 之前的 legacy 版**：`Location` 恒 1、estop 空体当「取消」。mock 可用 `/mock/robot-version` 切到新版行为。其他 mock/真机差异随夜测回填到 `mock_gateway/`。
+### 5.1 云端 API 侧
+1. **幂等键 10 分钟内全局唯一**：换库/重装会撞键 → 云端只回放不执行；每次重新下发都要换新键（键格式 `ps-{instance}-r{run}-l{leg}-a{attempt}`）。
+2. **订阅事件队列、取游标都要在下发之前**；到达判定还要 `GET /task` 对账兜底；要能识别「没开始 / 停滞 / 掉线 / 被外部任务替换 / 丢定位」五种「不再会到达」。
+3. **网关重启后事件 seq 归零** → 游标要重置（已做，会记 `event_cursor_reset`）。
+4. **真实网关偶发 nginx 版 HTML 502**（不是 JSON 信封）：错误文本要清洗，连续超过 `offline_timeout` 才判段失败。
+5. **`/position` 200 不代表定位新鲜**：机器人端停发 `/global_localization` 后云端一直回放缓存值（09-07 实测冻结 20 小时仍 200）。定位就绪只认 `received_at` 新鲜度。
+6. **`/perception.Location`**：2026-09-06 之前的机器人端恒为 1；新版才如实给 0。现场那台是 **legacy 版**。跨版本都别用它判断。
+7. **急停请求体必须显式布尔 `{"active": true}`**：旧版机器人端把空体当「取消急停」，新版直接 400。
 
-## 6. 未完成 / 待真机确认
+### 5.2 机器人行为（真机实测，与文档没写的）
+8. **机器人端间歇性不理会 `DELETE /task`**：12 次停止里 4 次云端回 200「任务已停止」而机器人走到终点才停（成串出现）。系统停任务后会核实 `stop_wait_seconds`，核实不了记红色事件 + 通知，可选自动急停。
+9. **软件急停会滑行 5–7 秒（约 5 m）才停住，且不取消云端任务**；取消急停后机器人接着走完。不是硬件急停。
+10. **机器人端重定位期间，任务状态就是 `NAVIGATING`（`map_name` 与 `path` 都为空）**。刚点过「④ 定位」就执行，必然被前置检查的「云端有任务在跑」拦下 —— 09-07 现场 7 次被拦全是这个。提示里已按「路径为空 = 定位残留」区分。
+11. **中途被替换的任务，云端不发新的 `task_started`**（状态没有跃迁）。外部任务识别靠事件里的 `total` 与本段路径长度比对、以及对账时比对 `path`。
+12. **Gazebo 与真狗共用 roscore 时，绝不能调 `device/start|stop`**（会把仿真速度指令接到真狗上 / 杀真机节点）。那种环境定位现成，直接执行。
 
-见 `docs/TODO.md`（与 `task.md §9` 同步）。此刻最重要：T3 机头校准（要真狗在真实环境）、T6/T7/T8 的真实时序、T10 真 VLM 效果。
+### 5.3 我们自己的设计约束
+13. **前置检查失败时不要去停云端任务** —— 我们一次都没下发过，那可能是别人的巡检或定位残留（T29 修过一次）。只停 `dispatched_any` 为真的。
+14. 进程退出前要中止执行并 `DELETE /task`（`RunManager.shutdown`）；启动时把库里残留的「进行中」执行标为中止（`runs_reconciled`）。
 
-## 7. 文档索引
+### 5.4 工程/环境
+15. **TTS 合成必须跑在守护线程里**：原先用 `ThreadPoolExecutor`（非守护），合成一卡（edge-tts 会卡）进程 30 s+ 退不掉 → `start.sh --stop` 落到 SIGKILL → 应用来不及停机器人。
+16. **`pkill -f` 会匹配到自己的命令行**（连 heredoc 内容也算）把 shell 杀掉 —— 重启用 `./start.sh --restart`，别把 kill 和 start 写在同一条命令里。
+17. 测试共用一个 mock 机器人：残留执行线程会污染后面的用例（靠 `RunManager.shutdown`）。
+18. 无头 Chrome 遇 SSE 长连接不结束 → 页面加 `?nosse=1`。
+19. 前端资源已设 `no-cache`；老部署上「改了 UI 看不到」要硬刷新（Ctrl+Shift+R）。
 
-`USAGE.md`（使用说明，日常操作入口）· `task.md`（总纲）· `DEVLOG.md`（逐时日志）· `TODO.md` · `ROADMAP.md` · `OPERATIONS.md`（真机手册）· `TEST_PLAN.md`（分步测试）· `SCREENSHOTS.md` · `CHANGELOG.md` · `deploy/`（systemd）。
+## 6. mock 网关能仿什么
+
+`mock_gateway/` 按上游文档逐条仿真，并复刻了真机实测到的行为：状态词写读不对称、`Location` 恒 1（可切 `new` 版）、未定位 `/position` 503、透传只认机器人 ID、幂等重放、5 rps 限流、急停空体陷阱、`nav_preprocess` 阶段、完成后回 idle、idle 无 `progress`、中途替换不发 `task_started`。
+
+故障注入 `POST /mock/*`：`fault`（避障/规划失败）、`offline`、`ros`、`preempt`（现场抢控制权）、`obstacle`（停滞）、`lose-localization`、`drop-events`、`html502`（可只针对 `/task`）、`ignore_stop`（停止指令被忽略）、`freeze_telemetry`（定位陈旧）、`relocalizing`（重定位残留状态）、`robot-version`（legacy/new）、`teleport`、`speed`、`reset`。
+
+## 7. 待办与规划
+
+- 未完成/待真机确认：`docs/TODO.md`（与 `task.md §9` 同步）。此刻最重要的三件：**T10 真 VLM 效果**（等 DashScope 密钥）、**T22 真狗上的停止忽略率与急停滑行**（决定「中止」按钮的语义）、**T3 真狗 Insta360 的机头零点**。
+- 路线图：`docs/ROADMAP.md`（与 `task.md §10` 同步）。
+
+## 8. 仓库与推送状态
+
+- 远端已配：`origin https://github.com/Nirvana051/patrol-scheduler.git`（用户选择**公开**）。
+- 全部 76 个提交的作者/提交者已改写为 `Zhongyuan Liu <zliu051@e.ntu.edu.sg>`（GitHub 按邮箱归属）；改写前的备份分支 `backup-stengg-email`，内容 diff 为空。
+- **还没推**：HTTPS 推送需要用户名 `Nirvana051` + Personal Access Token；或把 `~/.ssh/id_ed25519.pub` 加到 GitHub 后改用 SSH 远端。
+- 公开前已脱敏：另一台机器人的别名换成占位符；`ntu-dog-00001` / `R30_2026_001` / `cam-1c697ada870c` 保留（上游公开仓库文档里本来就有）。全历史扫过：无任何真实密钥，`config/.env` 与 `data/` 从未提交。
+- 公开仓库还缺 LICENSE（选哪个是用户的决定）。
+
+## 9. 文档索引
+
+| 文档 | 什么时候看 |
+|------|-----------|
+| [USAGE.md](USAGE.md) | **日常操作入口**：装、启动、建任务航点、跑巡检、接 VLM/播报、维护、常见问题 |
+| [task.md](task.md) | 总纲：宪法约束（C1–C16）、术语、架构、数据模型、业务流程、接口清单、进度、问题清单、规划 |
+| [OPERATIONS.md](OPERATIONS.md) | 真机上线与安全细则、故障速查表 |
+| [TEST_PLAN.md](TEST_PLAN.md) | 分步验收清单（含真机实测参考值与演练结果） |
+| [DEVLOG.md](DEVLOG.md) | 逐时开发日志（每个 bug 的现象→定位→修法都在这里） |
+| [TODO.md](TODO.md) / [ROADMAP.md](ROADMAP.md) | 问题清单 / 未来规划（都由 task.md 同步生成） |
+| [SCREENSHOTS.md](SCREENSHOTS.md) | 界面截图与真机全景样张 |
+| `../CHANGELOG.md` | 版本变更 |
+| `../deploy/README.md` | systemd、cron 备份、反向代理提醒 |
 
 ---
-最后更新：2026-09-07 16:10（同步上游 6167083 后）。
+最后更新：2026-09-07 22:20（第三天：上游同步、通义千问接入、任务起始点、前置检查修复、使用说明与本文档刷新）。

@@ -1,7 +1,7 @@
 # 常用命令。需要先建好 .venv（见 README）。
 PY := .venv/bin/python
 
-.PHONY: start stop status run mock test lint shots seed smoke clean-media lock backup eval vlm audio-server
+.PHONY: start stop status run mock test lint docs-check shots seed smoke clean-media lock backup eval vlm audio-server
 
 start:          ## 一键后台启动（按 config/.env；加 ARGS="--mock --audio" 可叠加）
 	./start.sh $(ARGS)
@@ -20,6 +20,9 @@ mock:           ## 同时起 mock 网关 + 调度系统
 
 test:           ## 全量测试（约 2 分钟）
 	$(PY) -m pytest
+
+docs-check:     ## 文档体检（链接/截图/make 目标/选项名/用例数与代码是否一致）
+	$(PY) scripts/check_docs.py
 
 lint:           ## 静态检查
 	$(PY) -m ruff check .
