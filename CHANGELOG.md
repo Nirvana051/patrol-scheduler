@@ -1,5 +1,12 @@
 # 变更记录
 
+## [0.4.2] - 2026-09-07
+- 新增 `qwen` VLM 提供方（阿里 DashScope 兼容模式）：默认地址、模型 `qwen3.5-flash`，**自动带 `enable_thinking:false`**（非流式调用缺这个参数会 400）
+- 新增 `VLM_EXTRA_BODY`：JSON 对象合并进请求体，用于服务商私有参数（如 `vl_high_resolution_images`）
+- VLM 服务端错误改为带出 `error.message` 与 code，排查密钥/模型名不再靠猜
+- 新增 `scripts/vlm_probe.py`（`make vlm`）：一张图 + 一句问题的连通性探针，可临时覆盖 provider/model/key
+- 手册加「接 VLM（以通义千问为例）」一节；110 用例
+
 ## [0.4.1] - 2026-09-07
 - 同步上游 `Sample_web_api@6167083` 的 SDK（透传通道 429/网络重试、`device_start|stop`/`localize` 自动幂等键、`events(limit=)`、`watch_task` idle 宽限）；包装层去掉重复的 429 重试
 - **修 T26**：`/position` 200 不代表定位新鲜（机器人端停发话题后云端回放缓存值）——定位就绪改为要求 `received_at` 新鲜，前置检查明确报「定位数据已陈旧 N 小时」

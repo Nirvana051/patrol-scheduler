@@ -37,7 +37,7 @@ make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 | 云端事件监听、游标、落库 | `app/robot/events.py` |
 | 分段执行状态机（下发/到达/失败/重试/暂停/丢定位/外部任务） | `app/executor/runner.py` |
 | 抓图 → 裁切 → VLM → TTS | `app/executor/inspection.py`，`app/media/pano.py`，`app/media/snapshot.py` |
-| VLM / TTS 适配器 | `app/vlm/*`，`app/tts/base.py`；扬声器端服务 `audio_server/` |
+| VLM / TTS 适配器 | `app/vlm/*`（`QwenVlm` = DashScope 兼容模式，非流式必须带 `enable_thinking:false`），`app/tts/base.py`；扬声器端服务 `audio_server/`。接新 VLM 先跑 `make vlm` 探针 |
 | REST / SSE | `app/api/*.py`，装配在 `app/context.py`，入口 `app/main.py` |
 | 定时计划 | `app/scheduler.py` |
 | 前端 | `web/js/views/*.js`（原生 JS，无构建；`?nosse=1` 静态模式供截图） |

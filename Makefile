@@ -1,7 +1,7 @@
 # 常用命令。需要先建好 .venv（见 README）。
 PY := .venv/bin/python
 
-.PHONY: start stop status run mock test lint shots seed smoke clean-media lock backup eval audio-server
+.PHONY: start stop status run mock test lint shots seed smoke clean-media lock backup eval vlm audio-server
 
 start:          ## 一键后台启动（按 config/.env；加 ARGS="--mock --audio" 可叠加）
 	./start.sh $(ARGS)
@@ -38,6 +38,9 @@ clean-media:    ## 清理 30 天前的执行媒体与事件（先 dry-run 看看
 
 backup:         ## 在线备份 SQLite 到 data/backups（保留 14 份）
 	$(PY) scripts/backup_db.py
+
+vlm:            ## VLM 连通性探针（接新服务商时先跑这个；可加 ARGS="--provider qwen --key sk-..."）
+	$(PY) scripts/vlm_probe.py $(ARGS)
 
 eval:           ## 用人工复核过的检查评测当前 VLM
 	$(PY) scripts/eval_vlm.py

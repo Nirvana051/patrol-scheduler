@@ -74,7 +74,7 @@ FastAPI（scheduler/app，单进程多线程）
    ├─ media/snapshot      RtspFfmpegSource | SyntheticPanoSource | FileSource
    ├─ media/pano          角度↔像素、跨缝裁切、标注
    ├─ media/pointcloud    PCD 读取 + 体素下采样（接口，后续接真机点云）
-   ├─ vlm/*               MockVlm | OpenAICompatVlm（Qwen-VL/Ollama/vLLM/OpenAI）| AnthropicVlm（官方 SDK）
+   ├─ vlm/*               MockVlm | QwenVlm（DashScope 兼容模式，自动带 enable_thinking:false）| OpenAICompatVlm（Ollama/vLLM/OpenAI）| AnthropicVlm（官方 SDK）
    ├─ tts/*               EdgeTts | CommandTts | 汇出：浏览器 / 本机扬声器 / 自带 audio_server（HTTP，机器狗端）/ Webhook
    └─ db                  SQLite（WAL），schema.sql 迁移
    │
@@ -185,7 +185,7 @@ for 每个任务航点 T（按 seq）:
 | **任务规划** | 任务 CRUD；有序航点列表；执行选项（速度/步态/避障/稳定/各类超时/重试/丢定位策略/返回起点）；定时计划 | 从任务航点表或地图加入、就地新建任务航点；路线预览（各段路径、总长）；「执行」；「⏰ 定时」（每天固定时刻 / 每 N 分钟，立即触发） |
 | **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS；本次执行的云端 + 系统事件 | 暂停 / 跳过 / 中止；回放 TTS；人工改判；失败或中止后「从某航点重跑剩余航点」；导出本次事件 CSV |
 | **任务事件** | 云端 + 系统事件统一时间线，可按来源/类型/级别/执行/关键字过滤，实时追加 | 翻页加载更早；导出 CSV |
-| **设置** | 连接（host/别名/密钥掩码）、VLM（provider/base_url/model/key）、TTS（引擎/声音/汇出）、抓图源、执行默认值、通知 webhook、定时器间隔、机头校准（FORWARD_DEG）、系统自检、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
+| **设置** | 连接（host/别名/密钥掩码）、VLM（provider=mock/qwen/openai_compat/anthropic、base_url/model/key/额外请求字段）、TTS（引擎/声音/汇出）、抓图源、执行默认值、通知 webhook、定时器间隔、机头校准（FORWARD_DEG）、系统自检、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
 
 设计语言：浅色专业控制台风格，系统字体 + Noto Sans CJK；状态色 绿/黄/红 只用于状态；所有让机器人动的操作在 REAL 模式二次确认；深色模式跟随系统。
 
@@ -265,6 +265,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 - 02:30 定时计划（schema v3）；02:55 人工改判（schema v4）、失败通知 webhook、CSV 导出；03:10 执行器复审；02:03 起通宵定时执行观察。
 - 02:20 VLM 评测脚本（人工复核当标注）、导出/导入、重建图重定向。
 - 04:47 通宵观察抓到 edge-tts 卡死执行的 bug（T21）→ 合成超时 + 启动对账残留执行；04:53 重启后 50 趟连续完成，零告警。
+- 09-07 16:30 接入通义千问：`qwen` 提供方（DashScope 兼容模式）、`VLM_EXTRA_BODY` 透传私有参数、`make vlm` 连通性探针；等密钥实测。
 - 09-07 16:00 拉取上游 `6167083`（SDK 加固 + 文档双轨）：同步 vendored SDK、去掉包装层重复的 429 重试；据此更新 C3/C9/C11；发现并修掉 T26（陈旧定位误判）。现场那台机器人仍是 **legacy 版**（Location 恒 1）。
 - 07:26 观察收束：104 趟 / 103 完成 / 1 中止；`v0.2.2`。
 - 09-05 21:15 第一次真机（Gazebo）执行成功；21:17 四点巡检 4 分钟完成；21:26 演练暴露 T22（机器人不理会停止）与 T23（真机事件撞号丢失）；21:50 演练 D 暴露 T24 并修复；22:00 起通宵计划；23:25–23:38 停止/急停探针。
@@ -296,7 +297,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 |---|------|-----------|
 | T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
-| T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
+| T10 | 真 VLM 效果未验证（mock 只交替回答） | 通路已就绪：`qwen` 提供方（DashScope 兼容模式，自动带 `enable_thinking:false`）+ `make vlm` 探针 + 编辑器「试问 VLM」+ `make eval` 评测；**待用户提供 DashScope 密钥后实测** `qwen3.5-flash` 能否读图、判读准确率 |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
 | T12 | 无登录鉴权；`TTS_COMMAND` 可在设置页改成任意命令 | 默认只绑 127.0.0.1；局域网暴露需反向代理 + 鉴权，并把危险设置移出网页 |
 | T14 | 媒体与事件无限增长 | `scripts/cleanup_media.py` 已有，需 cron 化 |

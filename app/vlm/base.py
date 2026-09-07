@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import re
 import time
@@ -118,12 +119,29 @@ class MockVlm(VlmProvider):
                          latency_ms=int((time.time() - t0) * 1000))
 
 
+def _extra_body(cfg) -> dict:
+    """VLM_EXTRA_BODY：合并进请求体的额外字段（服务商私有参数）。写坏了只记一行日志，不影响判读。"""
+    raw = (cfg.get('VLM_EXTRA_BODY') or '').strip()
+    if not raw:
+        return {}
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, dict) else {}
+    except ValueError:
+        logging.getLogger('scheduler').warning('VLM_EXTRA_BODY 不是合法 JSON 对象，已忽略：%s', raw[:120])
+        return {}
+
+
 def build_provider(cfg) -> VlmProvider:
     p = (cfg.get('VLM_PROVIDER') or 'mock').lower()
+    if p == 'qwen':
+        from .openai_compat import QwenVlm
+        return QwenVlm(cfg.get('VLM_BASE_URL'), cfg.get('VLM_MODEL'), cfg.get('VLM_API_KEY'),
+                       timeout=cfg.get_float('VLM_TIMEOUT'), extra_body=_extra_body(cfg))
     if p == 'openai_compat':
         from .openai_compat import OpenAICompatVlm
         return OpenAICompatVlm(cfg.get('VLM_BASE_URL'), cfg.get('VLM_MODEL'), cfg.get('VLM_API_KEY'),
-                               timeout=cfg.get_float('VLM_TIMEOUT'))
+                               timeout=cfg.get_float('VLM_TIMEOUT'), extra_body=_extra_body(cfg))
     if p == 'anthropic':
         from .anthropic_provider import AnthropicVlm
         return AnthropicVlm(api_key=cfg.get('ANTHROPIC_API_KEY') or None, model=cfg.get('ANTHROPIC_MODEL'),

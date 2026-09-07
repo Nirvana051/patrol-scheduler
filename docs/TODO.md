@@ -21,7 +21,7 @@
 |---|------|-----------|
 | T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
-| T10 | 真 VLM 效果未验证（mock 只交替回答） | prompt 模板、JSON 解析、附带范围标注整图都已具备；先用编辑器「试问 VLM」在参考图上标定，再建评测集（roadmap） |
+| T10 | 真 VLM 效果未验证（mock 只交替回答） | 通路已就绪：`qwen` 提供方（DashScope 兼容模式，自动带 `enable_thinking:false`）+ `make vlm` 探针 + 编辑器「试问 VLM」+ `make eval` 评测；**待用户提供 DashScope 密钥后实测** `qwen3.5-flash` 能否读图、判读准确率 |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
 | T12 | 无登录鉴权；`TTS_COMMAND` 可在设置页改成任意命令 | 默认只绑 127.0.0.1；局域网暴露需反向代理 + 鉴权，并把危险设置移出网页 |
 | T14 | 媒体与事件无限增长 | `scripts/cleanup_media.py` 已有，需 cron 化 |

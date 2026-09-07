@@ -250,3 +250,9 @@
 - 复查 C9 时顺手看真机遥测：`global_localization.received_at` 是 **20.1 小时前**（09-06 19:54 之后仿真就没再发布），位姿冻结在 (15.02, −13.04)——已经在我们那张地图范围外；但 **`/position` 依然 200**（云端回放最后一次缓存值）。
 - 我们原先 `localized = position_ready OR fresh`，这种情况下会**误判为定位就绪并放行执行**。改成：有遥测就要求「新鲜 且 /position 非 503」，并单独标 `localization_stale`；前置检查明确写「定位数据已陈旧 20.0 小时：机器人端不再发布 /global_localization（仿真/导航栈停了？），注意 /position 仍会回放缓存值」。
 - mock 加两个开关复现：`freeze_telemetry`（冻结 received_at）与 `robot_version`（legacy/new：Location 0/1、estop 空体 400），各配用例。现场那台确认是 **legacy 版**（定位正常但 Location=1）。
+
+## 16:30 接入通义千问（DashScope 兼容模式）
+- 用户给的文档页就是 DashScope 的 OpenAI 兼容端点（`https://dashscope.aliyuncs.com/compatible-mode/v1`，模型 `qwen3.5-flash`，标注支持文本/图像/视频），所以走我们现有的 openai_compat 通路即可——但有个硬性坑：**DashScope 对推理型 Qwen 的非流式调用要求显式 `enable_thinking: false`**，缺了直接 400。我们的判读是一次性非流式请求，于是加了 `QwenVlm` 预设（默认地址 + 自动带该参数），并加 `VLM_EXTRA_BODY` 让服务商私有参数（如 `vl_high_resolution_images`）可配。
+- 顺手改进：VLM 服务端错误现在带出 `error.message` 与 code（接新服务商时密钥/模型名写错能一眼看出）；新增 `scripts/vlm_probe.py`（`make vlm`）——拿最近一次检查的裁切图 + 一句问题探一次，可用 `--provider/--model/--key` 临时覆盖而不写回配置。
+- 测试：假 DashScope 服务断言请求体带 `enable_thinking:false` 与合并后的私有参数、图片走 data URI、错误原文被带出；`build_provider('qwen')` 的默认值与坏 JSON 容错。
+- 待用户给 DashScope 密钥后实测 `qwen3.5-flash` 是否真能读图（若拒收就换 `qwen3-vl-plus` / `qwen-vl-max`）。

@@ -49,7 +49,7 @@
 
 ## 4. 换真 VLM（20 分钟）
 
-1. 设置页 VLM 改 `openai_compat`（Qwen-VL / Ollama / vLLM，填 base_url + model）或 `anthropic`（填 key），保存。
+1. 设置页 VLM 改 **`qwen`**（阿里 DashScope：地址留空、模型 `qwen3.5-flash`、填 `sk-…` 密钥）或 `openai_compat`（Ollama/vLLM，填 base_url + model）或 `anthropic`（填 key），保存。先 `make vlm` 命令行探一次，通了再往下。
 2. 每个航点「试问 VLM（用参考图）」：看回答、原始 JSON、耗时；不对就改 prompt（更具体的目标描述、加"只看画面中间"），或把范围收窄，或勾「附整张全景」。
 3. 再跑一趟任务；对每条检查点「判通过 / 判不通过」做人工复核；跑 3–5 趟后 `make eval`（用复核当标注算准确率、看误判清单）。
 

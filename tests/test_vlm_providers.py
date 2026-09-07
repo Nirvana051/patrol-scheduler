@@ -139,3 +139,58 @@ def test_build_provider_switch(tmp_path, monkeypatch):
     assert build_provider(Config(env_file=tmp_path / 'no.env')).name == 'anthropic'
     monkeypatch.setenv('VLM_PROVIDER', 'mock')
     assert build_provider(Config(env_file=tmp_path / 'no.env')).name == 'mock'
+
+
+def test_qwen_provider_defaults_and_enable_thinking(fake_openai):
+    """DashScope 非流式调用必须显式带 enable_thinking:false，否则 400；base_url 默认走兼容模式地址。"""
+    from app.vlm.openai_compat import QwenVlm
+    base, seen = fake_openai
+    v = QwenVlm(model='qwen3.5-flash')
+    assert v.base_url == 'https://dashscope.aliyuncs.com/compatible-mode/v1' and v.name == 'qwen'
+    assert v.extra_body == {'enable_thinking': False}
+    v = QwenVlm(base, 'qwen3.5-flash', 'sk-test', extra_body={'vl_high_resolution_images': True})
+    r = v.ask_yes_no([(b'img', 'image/jpeg')], '有红色圆柱吗？')
+    assert r.answer == 'yes' and r.provider == 'qwen'
+    body = seen[-1]['body']
+    assert body['enable_thinking'] is False and body['vl_high_resolution_images'] is True
+    assert body['model'] == 'qwen3.5-flash' and seen[-1]['auth'] == 'Bearer sk-test'
+    assert body['messages'][1]['content'][1]['image_url']['url'].startswith('data:image/jpeg;base64,')
+    assert 'qwen' in v.describe() and 'qwen3.5-flash' in v.describe()
+
+
+def test_build_provider_qwen_reads_extra_body(tmp_path, monkeypatch):
+    from app.config import Config
+    from app.vlm.base import build_provider
+    monkeypatch.setenv('VLM_PROVIDER', 'qwen')
+    monkeypatch.setenv('VLM_BASE_URL', '')
+    monkeypatch.setenv('VLM_MODEL', 'qwen3-vl-plus')
+    monkeypatch.setenv('VLM_EXTRA_BODY', '{"seed": 7}')
+    v = build_provider(Config(env_file=tmp_path / 'no.env'))
+    assert v.name == 'qwen' and v.model == 'qwen3-vl-plus'
+    assert v.extra_body == {'enable_thinking': False, 'seed': 7}
+    monkeypatch.setenv('VLM_EXTRA_BODY', '不是 JSON')          # 写坏了只忽略，不炸
+    assert build_provider(Config(env_file=tmp_path / 'no.env')).extra_body == {'enable_thinking': False}
+
+
+def test_openai_compat_surfaces_server_error_message():
+    """服务端的 {"error": {"message": ...}} 要原样带出来，否则排查密钥/模型名很痛苦。"""
+    import json as _json
+    from mock_gateway.server import serve_in_thread
+    from tests.conftest import free_port
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from app.vlm.openai_compat import QwenVlm
+    app = FastAPI()
+
+    @app.post('/v1/chat/completions')
+    def boom():
+        return JSONResponse({'error': {'message': 'parameter.enable_thinking must be set to false for non-streaming calls',
+                                       'type': 'invalid_request_error', 'code': 'InvalidParameter'}}, status_code=400)
+    port = free_port()
+    server, _ = serve_in_thread(app, port=port)
+    try:
+        r = QwenVlm(f'http://127.0.0.1:{port}/v1', 'qwen3.5-flash', 'sk-x').ask_yes_no([(b'i', 'image/jpeg')], 'q')
+        assert r.answer == 'error' and 'enable_thinking' in r.error and 'InvalidParameter' in r.error
+        assert _json.loads(r.raw)['error']['code'] == 'InvalidParameter'
+    finally:
+        server.should_exit = True

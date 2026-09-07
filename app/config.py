@@ -22,9 +22,10 @@ DEFAULTS: dict[str, str] = {
     'STATUS_POLL_ACTIVE': '2',        # 有页面/执行时的轮询间隔（秒），不小于 1
     'STATUS_POLL_IDLE': '8',
     # VLM
-    'VLM_PROVIDER': 'mock',           # mock | openai_compat | anthropic
-    'VLM_BASE_URL': 'http://127.0.0.1:11434/v1',
+    'VLM_PROVIDER': 'mock',           # mock | qwen | openai_compat | anthropic
+    'VLM_BASE_URL': 'http://127.0.0.1:11434/v1',   # qwen 留空即用 DashScope 兼容模式地址
     'VLM_MODEL': 'qwen2.5vl:7b',
+    'VLM_EXTRA_BODY': '',             # JSON 对象，合并进请求体（服务商私有参数，如 {"vl_high_resolution_images": true}）
     'VLM_API_KEY': '',
     'VLM_TIMEOUT': '120',
     'VLM_SEND_FULL_PANO': '0',        # 1 = 裁切图之外再附整张全景

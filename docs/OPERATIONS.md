@@ -65,6 +65,29 @@ python3 ../Sample_web_api/examples/python/04_verify_flow.py --robot ntu-dog-0000
 - 机器人掉线 / 云端不可达超过 `offline_timeout`（默认 90 s）段判失败并停任务。
 - **停任务不一定真的停**：Gazebo 机器人对 `DELETE /task` 回 200 却继续走完（真狗待验证）。系统停任务后会核实 `stop_wait_seconds` 内云端任务是否 terminal，核实不了会记红色事件「机器人端未响应停止指令」并发通知——此时用顶栏「急停」，并到现场确认。任务选项「停不下来时自动急停」可让系统自动下发软件急停（默认关）。Gazebo 实测：急停后机器人还会滑行 5–7 s（约 5 m）才停住，急停不取消云端任务，取消急停后它会接着走完——真狗上先测这两点再决定是否开启。
 
+## 5a. 接 VLM（以阿里通义千问 / DashScope 为例）
+
+判读走的是 OpenAI 兼容协议，接新服务商基本只是填配置。
+
+1. 拿 DashScope 的 API Key（`sk-…`）。
+2. 「设置 → VLM 视觉判读」：提供方选 **qwen**；**OpenAI 兼容地址留空**（默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`）；模型填 `qwen3.5-flash`；API Key 填 `sk-…`；保存。
+   - 也可以写在 `config/.env`：`VLM_PROVIDER=qwen`、`VLM_MODEL=qwen3.5-flash`、`VLM_API_KEY=sk-…`。
+3. 命令行先探一次（不动机器人）：
+   ```bash
+   make vlm                                   # 用最近一次检查的裁切图问一句
+   make vlm ARGS='--prompt "画面中间是否有一座棕色的圆顶建筑？"'
+   make vlm ARGS='--provider qwen --model qwen3-vl-plus --key sk-xxx'   # 临时覆盖，不写回配置
+   ```
+   打印提供方、请求要点、原始回复、解析出的是/不是与耗时；失败会带出服务端错误原文。
+4. 通了之后在「任务航点」里逐点「试问 VLM」调 prompt 与角度范围；积累人工复核后 `make eval` 看准确率。
+
+要点：
+- **DashScope 的非流式调用必须带 `enable_thinking: false`**，缺了直接 400（`parameter.enable_thinking must be set to false for non-streaming calls`）。选 `qwen` 提供方时系统自动带上；用通用 `openai_compat` 接 DashScope 就得自己在「额外请求字段」里填 `{"enable_thinking": false}`。
+- 模型必须能读图。`qwen3.5-flash` 官方标注支持文本/图像/视频；若报「不支持图片」就换 `qwen3-vl-plus` 或 `qwen-vl-max`。
+- 「额外请求字段」是个 JSON 对象，直接合并进请求体，用来传服务商私有参数（如 `{"vl_high_resolution_images": true}` 让模型按高分辨率读图）。
+- 默认只把**裁切图**发给模型；勾「附整张全景」会把带角度标注的整图一起发（两张图、更贵，但模型能看到「第几度到第几度」）。
+- 判读只认「是 / 不是」：prompt 要具体指名目标，答案模版里的期望值决定通过与播报。
+
 ## 5b. 定时、通知与复核
 
 - **定时计划**：「任务规划 → ⏰ 定时」，每天固定时刻（如 `07:30,19:30`）或每 N 分钟。到点时若已有执行在跑会跳过并记事件；执行前照常做前置检查（未初始化就会 aborted，事件里能看到原因）。
