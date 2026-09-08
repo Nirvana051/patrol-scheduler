@@ -1,5 +1,5 @@
-# 常用命令。需要先建好 .venv（见 README）。
-PY := .venv/bin/python
+# 常用命令。需要先建好 .venv（见 docs/USAGE.md §1）；用自己的环境就 PS_PYTHON=$(which python) make ...
+PY := $(if $(PS_PYTHON),$(PS_PYTHON),.venv/bin/python)
 
 .PHONY: start stop status run mock test lint docs-check shots seed smoke clean-media lock backup eval vlm audio-server
 

@@ -1,0 +1,35 @@
+# 全仓库统一 LF。没有这个文件时，在 Windows 上 clone（Git for Windows 默认
+# core.autocrlf=true）或经由 Windows 目录中转，*.sh 会变成 CRLF，然后 bash 直接报
+#   /usr/bin/env: ‘bash\r’: No such file or directory
+#   syntax error near unexpected token `$'in\r''
+# 见 docs/USAGE.md §7「换了一台机器，脚本全报 \r 错」。
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.sql   text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.toml  text eol=lf
+*.ini   text eol=lf
+*.service text eol=lf
+Makefile   text eol=lf
+env.example text eol=lf
+
+# 二进制：不做任何换行/编码转换
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.gif  binary
+*.ico  binary
+*.mp3  binary
+*.wav  binary
+*.ttf  binary
+*.ttc  binary
+*.woff binary
+*.woff2 binary
+*.pcd  binary
+*.db   binary

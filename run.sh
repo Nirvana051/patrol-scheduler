@@ -5,8 +5,8 @@
 #   MOCK_SPEED=3 ./run.sh --mock   让仿真机器人跑快一点
 set -euo pipefail
 cd "$(dirname "$0")"
-PY=.venv/bin/python
-[ -x "$PY" ] || { echo "缺少 .venv，先执行: python3 -m venv --without-pip --system-site-packages .venv && pip3 --python .venv/bin/python install -r requirements.txt"; exit 1; }
+PY="${PS_PYTHON:-.venv/bin/python}"
+[ -x "$PY" ] || { echo "缺少可用的 Python 环境。先执行: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"; exit 1; }
 MOCK_PID=""
 if [ "${1:-}" = "--mock" ]; then
   $PY -m mock_gateway.server --port "${MOCK_PORT:-18443}" --speed "${MOCK_SPEED:-1.0}" ${MOCK_ARGS:-} &

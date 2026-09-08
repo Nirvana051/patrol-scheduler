@@ -1,6 +1,11 @@
+# 运行时依赖（app/、mock_gateway/、audio_server/ 全部 import 到的第三方包）
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
-edge-tts>=6.1
-anthropic>=1.0
-# 以下来自系统 site-packages（venv 用 --system-site-packages）：numpy, Pillow, opencv-python, pytest, requests
+requests>=2.25              # 云端/VLM/播报的 HTTP 调用（app/vlm/openai_compat.py、app/tts/base.py）
+Pillow>=9                   # 全景裁切/标注（app/media/pano.py）
+numpy>=1.21                 # 点云下采样（app/media/pointcloud.py，开机即 import）
+edge-tts>=6.1               # 默认 TTS 引擎；换 command 引擎可不装
+anthropic>=1.0              # VLM_PROVIDER=anthropic 才用；其他服务商走 requests
+
+# 开发/测试另需：pytest、ruff（make test / make lint）

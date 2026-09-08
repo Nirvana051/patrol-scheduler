@@ -39,11 +39,18 @@
 一次性准备（已经装过就跳过）：
 
 ```bash
-cd /home/leo/agent/scheduler
-python3 -m venv --without-pip --system-site-packages .venv
-pip3 --python .venv/bin/python install -r requirements.txt
+cd /home/leo/agent/scheduler            # 换机器就是你 clone 出来的目录
+python3 -m venv .venv                   # 报错缺 venv 就先 sudo apt-get install -y python3-venv
+.venv/bin/pip install -r requirements.txt
 sudo apt-get install -y ffmpeg          # 抓全景要用
 ```
+
+已经有自己的 conda/venv 环境、不想再建一个，就把解释器指过来：
+`PS_PYTHON=$(which python) ./start.sh`（`run.sh`、`make` 同样认这个变量）。
+
+**换一台机器**：`git clone` 之后先确认脚本是 LF 换行——从 Windows 中转过的仓库会变成
+CRLF，`./start.sh` 会报 `/usr/bin/env: ‘bash\r’`。仓库里的 `.gitattributes` 已经强制 LF，
+老 clone 出来的目录按 [§7 第一条](#7-常见问题) 一条命令修掉。
 
 日常启停（后台运行，日志在 `data/logs/`）：
 
@@ -284,6 +291,29 @@ ssh user@robot 'cd ~/patrol-audio && python3 -m audio_server --host 0.0.0.0 --po
 ---
 
 ## 7. 常见问题
+
+**换了一台机器，脚本全报 `\r` 错**
+症状是这几行里的任意一条：
+
+```
+/usr/bin/env: ‘bash\r’: No such file or directory
+start.sh: line 15: syntax error near unexpected token `$'in\r''
+cd: $'.\r': No such file or directory
+```
+
+文件是 Windows 换行（CRLF）。多半是在 Windows 上 clone（Git for Windows 默认
+`core.autocrlf=true` 会把 LF 转成 CRLF），或者经由 Windows 共享目录/编辑器中转过。修：
+
+```bash
+cd <仓库目录>
+find . -path ./.git -prune -o -type f \( -name '*.sh' -o -name '*.py' -o -name 'Makefile' \) -print0 \
+  | xargs -0 sed -i 's/\r$//'
+chmod +x start.sh run.sh
+```
+
+仓库里已经放了 `.gitattributes`（`* text=auto eol=lf`），**重新 clone 就不会再有这个问题**。
+另外 `sh start.sh` 永远不行——Ubuntu 的 `sh` 是 dash，不认 `set -o pipefail`；只能
+`./start.sh` 或 `bash start.sh`。
 
 **任务下发返回成功，但机器人不动**
 执行记录里会写「任务下发成功但机器人没有动」。按顺序查：是否漏了「② 启动设备」；是否漏了「④ 定位」；急停是否还在下发（顶栏灯）；路径里的航点是否属于另一张地图。

@@ -1,5 +1,11 @@
 # 变更记录
 
+## [0.4.8] - 2026-09-08
+- **修**：新增 `.gitattributes`（`* text=auto eol=lf`）—— 在 Windows 上 clone（`core.autocrlf=true` 是 Git for Windows 的默认值）会把 `*.sh` 转成 CRLF，`bash` 直接报 `‘bash\r’: No such file or directory`
+- **修**：`requirements.txt` 补上 Pillow / requests / numpy —— 之前当成"系统 site-packages 里有"，新机器上装完仍起不来
+- `start.sh` / `run.sh` / `Makefile` 认 `PS_PYTHON`：已有 conda/venv 环境可以直接指过来，不必再建 `.venv`
+- `docs/USAGE.md`：§1 换成任何机器都能照抄的安装命令，§7 新增「换了一台机器，脚本全报 \r 错」
+
 ## [0.4.7] - 2026-09-07
 - 新增 `docs/USAGE.md` 使用说明与 `docs/README.md` 文档索引；`docs/HANDOFF.md` 全面刷新
 - 截图集更新到当前 UI（含任务编辑器的起始点）；`SCREENSHOTS.md` 重写

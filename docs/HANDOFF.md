@@ -79,6 +79,7 @@ make seed             # 仿真下灌演示数据并跑一趟
 17. 测试共用一个 mock 机器人：残留执行线程会污染后面的用例（靠 `RunManager.shutdown`）。
 18. 无头 Chrome 遇 SSE 长连接不结束 → 页面加 `?nosse=1`。
 19. 前端资源已设 `no-cache`；老部署上「改了 UI 看不到」要硬刷新（Ctrl+Shift+R）。
+20. **换机器部署先看换行符**：仓库经 Windows 中转/在 Windows 上 clone 后 `*.sh` 变 CRLF，`bash` 直接报 `‘bash\r’: No such file or directory`。已加 `.gitattributes`（`* text=auto eol=lf`）从源头堵住；老 clone 用 `sed -i 's/\r$//'` 修。同时 `requirements.txt` 原先把 Pillow/requests/numpy 当"系统装好的"，新机器上会缺——现已列全。解释器可用 `PS_PYTHON` 指到自己的环境。
 
 ## 6. mock 网关能仿什么
 

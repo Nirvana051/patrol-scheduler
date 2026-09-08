@@ -8,7 +8,7 @@
 #   ./start.sh --restart  重启（等价 --stop 后 ./start.sh，参数可叠加：--restart --mock --audio）
 set -u
 cd "$(dirname "$0")"
-PY=.venv/bin/python
+PY="${PS_PYTHON:-.venv/bin/python}"      # 有自己的虚拟环境时用 PS_PYTHON 指过来
 LOG=data/logs; RUN=data/run; mkdir -p "$LOG" "$RUN"
 PORT="${PS_PORT:-8088}"; MOCK_PORT="${MOCK_PORT:-18443}"; AUDIO_PORT="${AUDIO_PORT:-5566}"
 MOCK=0; AUDIO=0; ACTION=start
@@ -40,7 +40,7 @@ case "$ACTION" in
   start) if alive app; then echo "调度系统已在运行，先停掉再启动（等价 --restart）"; do_stop; fi;;
 esac
 
-[ -x "$PY" ] || { echo "缺少 .venv，先执行: python3 -m venv --without-pip --system-site-packages .venv && pip3 --python .venv/bin/python install -r requirements.txt"; exit 1; }
+[ -x "$PY" ] || { echo "缺少可用的 Python 环境（默认 .venv/bin/python）。新机器上先执行:"; echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"; echo "（venv 建不出来先装 python3-venv；已有自己的环境可用 PS_PYTHON=\$(which python) ./start.sh）"; exit 1; }
 [ -f config/.env ] || [ "$MOCK" = 1 ] || { echo "没有 config/.env（真机凭据）。真机：cp config/env.example config/.env 并填 CX_KEY；仿真：./start.sh --mock"; exit 1; }
 
 if [ "$MOCK" = 1 ]; then

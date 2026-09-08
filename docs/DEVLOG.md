@@ -293,3 +293,10 @@
 - `task.md`：交付物数字更新（76 提交 / v0.4.6 / 118 用例 / 十篇文档）、§7 补上漏掉的 `device-stop` 路由、§8 加「第三天」进度表（用户在真机上的使用 + 我这边六次修复）、§10 的 VLM 评测项跟上现状；`TODO.md`/`ROADMAP.md` 按 §9/§10 重新生成。
 - 截图集换成当前 UI（v0.4.6）：新增「任务编辑器」一张（展示起始点 + 容差 + 21 项执行选项），其余九张重截；`SCREENSHOTS.md` 重写，说明每张图该看什么，并保留真机全景样张。
 - 新增 `scripts/check_docs.py`（`make docs-check`）：把文档里写的链接、截图、`make` 目标、脚本路径、任务选项名、设置项名、用例数、schema 版本跟代码对一遍。历史性文档（DEVLOG/CHANGELOG/task.md/TODO.md）的数字跳过比对。现在全绿。
+
+## 09-08 换一台机器跑不起来：CRLF + requirements 少了三个包
+- 用户在另一台机器上 `./start.sh` 报 `/usr/bin/env: ‘bash\r’: No such file or directory`、`syntax error near unexpected token $'in\r'`、`cd: $'.\r'` —— 全是 CRLF 换行。
+- 先确认不是我这边的问题：本地 `file *.sh` 全是 LF，`git grep -Il $'\r'` 无命中。那就是取仓库的路上被转的。用 `git -c core.autocrlf=true clone`（Git for Windows 的默认配置）复现成功：clone 出来的 `start.sh` 就是 CRLF。
+- 修：加 `.gitattributes`（`* text=auto eol=lf` + 逐类型 `eol=lf` + 图片/音频/字体标 binary），从源头堵住；再用同样的 autocrlf clone 复测，已是 LF。老 clone 出来的目录给一条 `sed -i 's/\r$//'` 一次修完。
+- 顺手把新机器的第二、第三道坎也铲了：`requirements.txt` 原先把 **Pillow / requests / numpy** 当作"系统 site-packages 里已经有"（注释里写着），但 `app/media/pano.py`、`app/vlm/openai_compat.py`、`app/media/pointcloud.py` 都是开机即 import，新机器上装完依赖照样起不来 —— 现已列全（cv2 其实从未用到，删掉）。`start.sh`/`run.sh`/`Makefile` 认 `PS_PYTHON`，已有 conda 环境的人不用再建 `.venv`。
+- 另外提醒了两句常识坑：`sh start.sh` 永远不行（Ubuntu 的 `sh` 是 dash，不认 `set -o pipefail`）；`run.sh` 是旧的前台脚本，现在只用 `start.sh`。
