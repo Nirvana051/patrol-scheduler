@@ -40,10 +40,27 @@
 
 ```bash
 cd /home/leo/agent/scheduler            # 换机器就是你 clone 出来的目录
-python3 -m venv .venv                   # 报错缺 venv 就先 sudo apt-get install -y python3-venv
-.venv/bin/pip install -r requirements.txt
+./bootstrap.sh --dev                    # 建隔离的 .venv + 按 requirements.lock 装依赖 + 自检
 sudo apt-get install -y ffmpeg          # 抓全景要用
 ```
+
+`bootstrap.sh` 做四件事，每一件都是为了让这套东西在 Ubuntu 上**不会莫名其妙地变**：
+
+1. 找一个 3.10+ 的解释器（优先用 `uv`，没有就退回 `python3 -m venv`）。
+2. 建**隔离**的 `.venv`（`include-system-site-packages = false`）——
+   不隔离的话系统 Python 里的包会漏进来，而机器人这类机器上的系统 Python
+   往往就是 ROS / CUDA 环境。
+3. 按 `requirements.lock` 装**精确版本**（52 个），换机器装出来的是同一套。
+4. 自检：逐个 import 并确认**每个包都来自 venv 内部**，`sys.path` 里没有外来目录。
+
+> ⚠️ **这台机器上最容易踩的一个坑**：`~/.bashrc` 里 `source /opt/ros/humble/setup.bash`
+> 会设置 `PYTHONPATH`，而它排在 venv 的 `site-packages` **前面** —— venv 里装的
+> numpy / Pillow / requests 会被 ROS 或工作区里的同名包顶掉，版本随 `apt upgrade`
+> 悄悄变化。实测过一次：venv 里能看到 **445 个包**（整个 ROS 2 + torch + CUDA），
+> 其中 numpy / pytest / scipy 各有两个版本并存。
+> `start.sh` / `run.sh` / `bootstrap.sh` 都会先 `unset PYTHONPATH PYTHONHOME` 再启动，
+> 清掉之后只剩 **55 个**必需的包。**自己在命令行直接跑 `.venv/bin/python` 时要记得也清一下**：
+> `env -u PYTHONPATH PYTHONNOUSERSITE=1 .venv/bin/python -m pytest`。
 
 已经有自己的 conda/venv 环境、不想再建一个，就把解释器指过来：
 `PS_PYTHON=$(which python) ./start.sh`（`run.sh`、`make` 同样认这个变量）。

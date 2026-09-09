@@ -9,6 +9,16 @@
 set -u
 cd "$(dirname "$0")"
 PY="${PS_PYTHON:-.venv/bin/python}"      # 有自己的虚拟环境时用 PS_PYTHON 指过来
+
+# ── Python 环境净化（跨平台稳定性的关键一条）─────────────────────────────
+# 这台机器的 ~/.bashrc 里 source 了 /opt/ros/humble/setup.bash 与 tianyi 工作区，
+# 于是每个 shell 都带着 11 个目录的 PYTHONPATH，而它排在 venv 的 site-packages
+# **前面** —— venv 里装的 numpy/Pillow/requests 会被 ROS 或工作区里的同名包顶掉，
+# 版本随 `apt upgrade` 悄悄变化（实测：venv 里 445 个包，其中 numpy/pytest/scipy
+# 各有两个版本并存）。清掉之后 venv 里只剩 55 个必需的包，全部来自 venv 自身。
+# 没有 ROS 的机器上这几行是无害的空操作。
+unset PYTHONPATH PYTHONHOME
+export PYTHONNOUSERSITE=1                # 也别用 ~/.local/lib 里的用户级包
 LOG=data/logs; RUN=data/run; mkdir -p "$LOG" "$RUN"
 PORT="${PS_PORT:-8088}"; MOCK_PORT="${MOCK_PORT:-18443}"; AUDIO_PORT="${AUDIO_PORT:-5566}"
 MOCK=0; AUDIO=0; ACTION=start
@@ -40,7 +50,7 @@ case "$ACTION" in
   start) if alive app; then echo "调度系统已在运行，先停掉再启动（等价 --restart）"; do_stop; fi;;
 esac
 
-[ -x "$PY" ] || { echo "缺少可用的 Python 环境（默认 .venv/bin/python）。新机器上先执行:"; echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"; echo "（venv 建不出来先装 python3-venv；已有自己的环境可用 PS_PYTHON=\$(which python) ./start.sh）"; exit 1; }
+[ -x "$PY" ] || { echo "缺少可用的 Python 环境（默认 .venv/bin/python）。新机器上先执行:"; echo "  ./bootstrap.sh"; echo "（它会建隔离的 .venv 并按 requirements.lock 装依赖；已有自己的环境可用 PS_PYTHON=\$(which python) ./start.sh）"; exit 1; }
 [ -f config/.env ] || [ "$MOCK" = 1 ] || { echo "没有 config/.env（真机凭据）。真机：cp config/env.example config/.env 并填 CX_KEY；仿真：./start.sh --mock"; exit 1; }
 
 if [ "$MOCK" = 1 ]; then

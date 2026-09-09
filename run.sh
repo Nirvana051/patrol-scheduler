@@ -6,7 +6,17 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="${PS_PYTHON:-.venv/bin/python}"
-[ -x "$PY" ] || { echo "缺少可用的 Python 环境。先执行: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"; exit 1; }
+
+# ── Python 环境净化（跨平台稳定性的关键一条）─────────────────────────────
+# 这台机器的 ~/.bashrc 里 source 了 /opt/ros/humble/setup.bash 与 tianyi 工作区，
+# 于是每个 shell 都带着 11 个目录的 PYTHONPATH，而它排在 venv 的 site-packages
+# **前面** —— venv 里装的 numpy/Pillow/requests 会被 ROS 或工作区里的同名包顶掉，
+# 版本随 `apt upgrade` 悄悄变化（实测：venv 里 445 个包，其中 numpy/pytest/scipy
+# 各有两个版本并存）。清掉之后 venv 里只剩 55 个必需的包，全部来自 venv 自身。
+# 没有 ROS 的机器上这几行是无害的空操作。
+unset PYTHONPATH PYTHONHOME
+export PYTHONNOUSERSITE=1                # 也别用 ~/.local/lib 里的用户级包
+[ -x "$PY" ] || { echo "缺少可用的 Python 环境。先执行: ./bootstrap.sh"; exit 1; }
 MOCK_PID=""
 if [ "${1:-}" = "--mock" ]; then
   $PY -m mock_gateway.server --port "${MOCK_PORT:-18443}" --speed "${MOCK_SPEED:-1.0}" ${MOCK_ARGS:-} &

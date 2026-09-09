@@ -144,8 +144,11 @@ def synth_pano(width: int = 1280, height: int = 640, *, pose: dict | None = None
         if o['kind'] == 'cabinet':
             d.rectangle([cx - half, top, cx + half, bottom], fill=color, outline=(30, 30, 30), width=3)
             door_w = half if not door_open else int(half * 0.35)
-            d.rectangle([cx - half + 6, top + 6, cx - half + 6 + door_w * 2 - 12, bottom - 6],
-                        outline=(255, 255, 255), width=2)
+            # 门扇内缩 6 px；小图上 door_w 会小到让宽度变负（x1 < x0）——
+            # Pillow 9 静默吞掉，Pillow 12 直接 ValueError。画不出来就别画。
+            dx0, dx1 = cx - half + 6, cx - half + 6 + door_w * 2 - 12
+            if dx1 > dx0 and bottom - 6 > top + 6:
+                d.rectangle([dx0, top + 6, dx1, bottom - 6], outline=(255, 255, 255), width=2)
             if door_open:
                 d.text((cx - half, bottom + 4), '门未关', font=fs, fill=(255, 80, 80))
         elif o['kind'] == 'grid':
