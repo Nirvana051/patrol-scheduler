@@ -1,5 +1,9 @@
 # 常用命令。需要先建好 .venv（见 docs/USAGE.md §1）；用自己的环境就 PS_PYTHON=$(which python) make ...
 PY := $(if $(PS_PYTHON),$(PS_PYTHON),.venv/bin/python)
+# 直接调 python 的目标都要走 PYRUN：这类机器上 ~/.bashrc source 了 ROS 的 setup.bash，
+# PYTHONPATH 带着 11 个目录且排在 venv 的 site-packages 前面，会把 venv 里的包顶掉
+# （实测 `make test` 会用到 ROS 环境里的 numpy）。start.sh / run.sh 内部已自行净化。
+PYRUN := env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 $(PY)
 
 .PHONY: start stop status run mock test lint docs-check shots seed smoke clean-media lock backup eval vlm audio-server
 
@@ -13,43 +17,43 @@ status:         ## 运行状态 + 机器人前置检查
 	./start.sh --status
 
 run:            ## 前台启动调度系统（读 config/.env）
-	$(PY) -m app.main
+	$(PYRUN) -m app.main
 
 mock:           ## 同时起 mock 网关 + 调度系统
 	./run.sh --mock
 
 test:           ## 全量测试（约 2 分钟）
-	$(PY) -m pytest
+	$(PYRUN) -m pytest
 
 docs-check:     ## 文档体检（链接/截图/make 目标/选项名/用例数与代码是否一致）
-	$(PY) scripts/check_docs.py
+	$(PYRUN) scripts/check_docs.py
 
 lint:           ## 静态检查
-	$(PY) -m ruff check .
+	$(PYRUN) -m ruff check .
 
 shots:          ## 无头 Chrome 截图每个视图（需调度系统在跑）
 	scripts/ui_screenshots.sh
 
 seed:           ## 灌演示数据并跑一遍（mock）
-	$(PY) scripts/seed_demo.py --reset --init --run --mock-speed 6
+	$(PYRUN) scripts/seed_demo.py --reset --init --run --mock-speed 6
 
 smoke:          ## 真机只读冒烟
-	$(PY) scripts/real_smoke.py
+	$(PYRUN) scripts/real_smoke.py
 
 clean-media:    ## 清理 30 天前的执行媒体与事件（先 dry-run 看看）
-	$(PY) scripts/cleanup_media.py --keep-days 30 --events --dry-run
+	$(PYRUN) scripts/cleanup_media.py --keep-days 30 --events --dry-run
 
 backup:         ## 在线备份 SQLite 到 data/backups（保留 14 份）
-	$(PY) scripts/backup_db.py
+	$(PYRUN) scripts/backup_db.py
 
 vlm:            ## VLM 连通性探针（接新服务商时先跑这个；可加 ARGS="--provider qwen --key sk-..."）
-	$(PY) scripts/vlm_probe.py $(ARGS)
+	$(PYRUN) scripts/vlm_probe.py $(ARGS)
 
 eval:           ## 用人工复核过的检查评测当前 VLM
-	$(PY) scripts/eval_vlm.py
+	$(PYRUN) scripts/eval_vlm.py
 
 audio-server:   ## 本机起一个播报服务（扬声器端）用于联调：http://127.0.0.1:5566
-	$(PY) -m audio_server --host 127.0.0.1 --port 5566
+	$(PYRUN) -m audio_server --host 127.0.0.1 --port 5566
 
 lock:           ## 重新生成 requirements.lock
-	pip3 --python $(PY) freeze --local | grep -v -E '^(ruff|pip)=' > requirements.lock
+	pip3 --python $(PYRUN) freeze --local | grep -v -E '^(ruff|pip)=' > requirements.lock

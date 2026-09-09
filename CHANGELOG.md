@@ -1,5 +1,38 @@
 # 变更记录
 
+## [0.4.9] - 2026-09-09 —— Ubuntu 上的环境稳定性
+
+**为什么**：这台机器的系统 Python 就是机器人的 ROS 2 + CUDA + torch 环境，而 `~/.bashrc`
+里 `source /opt/ros/humble/setup.bash` 会设置 `PYTHONPATH`（11 个目录），它排在 venv 的
+`site-packages` **前面**。原 `.venv` 又是 `include-system-site-packages=true` 建的，于是
+venv 里能看到 **445 个包**，numpy/pytest/scipy/PyYAML 等各有两个版本并存，`requests`/`Pillow`
+实际来自 apt、`numpy` 来自 `~/.local` —— **`apt upgrade` 一动，巡检系统 import 到的东西就变了**。
+外加 venv 里没有 pip（装不了修不了），而系统 python 的 `ensurepip` 也被删了，
+文档里教的 `python3 -m venv .venv && .venv/bin/pip install` 在这台机器上跑不通。
+
+**新增**
+
+- `bootstrap.sh`：找 3.10+ 解释器（优先 `uv`，退回 `python -m venv`）→ 建**隔离** venv →
+  按 `requirements.lock` 装精确版本 → 自检「每个包都来自 venv 内部、`sys.path` 无外来目录」。
+  `ensurepip` 与 `uv` 都缺时给出两条明确出路。干净 clone 上 **9.2 秒**跑完，随后 `pytest` 118/118。
+- `scripts/soak.py`：Python 版浸泡测试，22 类场景轮换（正常/故障注入/人工操作/运维动作/网络抖动），
+  核对每类的预期结局与幂等键唯一性，每轮记 RSS/线程数/fd 数。app 与 mock 网关都跑成子进程走真实 HTTP。
+  **VLM=mock、TTS=none，不消耗任何付费接口。**
+- `docs/TEST_REPORT.md`：本轮测试报告（含隔离改造的前后对比）。
+
+**修**
+
+- **`.venv` 重建为隔离环境**（`include-system-site-packages=false`），包数 **445 → 55**，
+  `sys.path` 外来目录 11 → 0；`requirements.lock` 重新生成为 52 个精确版本。
+- `start.sh` / `run.sh` / `bootstrap.sh` 启动前 `unset PYTHONPATH PYTHONHOME` 并设
+  `PYTHONNOUSERSITE=1`；`Makefile` 的 11 处 python 调用统一走 `PYRUN`；
+  systemd 单元加 `UnsetEnvironment=PYTHONPATH PYTHONHOME`。没有 ROS 的机器上是无害空操作。
+- **`app/media/pano.py`：合成图里门扇矩形的坐标是反的**（小图上宽度变负 → `x1 < x0`）。
+  Pillow 9 静默吞掉、Pillow 12 直接 `ValueError` —— 这个门框在小图上一直没画出来过。
+  修法是「画不出来就不画」，而不是去钉住已 EOL 的 Pillow 9。
+- `docs/USAGE.md` §1 换成 `bootstrap.sh`，并写明 `PYTHONPATH` 这个坑与手工跑 `.venv/bin/python`
+  时的规避写法。
+
 ## [0.4.8] - 2026-09-08
 - **修**：新增 `.gitattributes`（`* text=auto eol=lf`）—— 在 Windows 上 clone（`core.autocrlf=true` 是 Git for Windows 的默认值）会把 `*.sh` 转成 CRLF，`bash` 直接报 `‘bash\r’: No such file or directory`
 - **修**：`requirements.txt` 补上 Pillow / requests / numpy —— 之前当成"系统 site-packages 里有"，新机器上装完仍起不来

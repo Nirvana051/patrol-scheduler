@@ -9,6 +9,7 @@
 | **接真机上线**：凭据、初始化 ②③④、安全红线、故障速查 | [OPERATIONS.md](OPERATIONS.md) |
 | **接 VLM**（通义千问 / Ollama / OpenAI / Anthropic）或**接播报** | [USAGE.md §5](USAGE.md#5-接-vlm-与播报) |
 | **验收 / 逐步测一遍**（含真机实测参考值与故障演练结果） | [TEST_PLAN.md](TEST_PLAN.md) |
+| **最近一轮测试跑了什么、结果如何** | [TEST_REPORT.md](TEST_REPORT.md)（含 .venv 隔离改造的前后对比）|
 | **接手这套代码**：现状、改哪儿、有哪些坑不能再踩 | [HANDOFF.md](HANDOFF.md) |
 | **搞清设计**：宪法约束、术语、架构、数据模型、业务流程、接口清单 | [task.md](task.md)（总纲） |
 | **还剩什么没做 / 未来做什么** | [TODO.md](TODO.md) / [ROADMAP.md](ROADMAP.md)（都由 task.md §9/§10 同步生成） |

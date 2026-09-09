@@ -15,6 +15,11 @@ RestartSec=5
 # 退出时应用会先中止进行中的执行并 DELETE /task 停下机器人，再停线程；给它足够时间
 TimeoutStopSec=40
 Environment=PS_LOG_LEVEL=info
+# systemd 给的是干净环境，本来不会带上 shell 里的 PYTHONPATH（ROS 的 setup.bash 设的那 11 个目录）。
+# 但如果改成 --user 单元、或加了 EnvironmentFile 把 shell 环境引进来，就会把 venv 里的包顶掉。
+# 这两行是保险：明确不用用户级包（~/.local/lib）、也不认外部 PYTHONPATH。
+Environment=PYTHONNOUSERSITE=1
+UnsetEnvironment=PYTHONPATH PYTHONHOME
 
 [Install]
 WantedBy=multi-user.target
