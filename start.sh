@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 PY="${PS_PYTHON:-.venv/bin/python}"      # 有自己的虚拟环境时用 PS_PYTHON 指过来
 
 # ── Python 环境净化（跨平台稳定性的关键一条）─────────────────────────────
-# 这台机器的 ~/.bashrc 里 source 了 /opt/ros/humble/setup.bash 与 tianyi 工作区，
+# 这台机器的 ~/.bashrc 里 source 了 /opt/ros/humble/setup.bash 与本机的 ROS 工作区，
 # 于是每个 shell 都带着 11 个目录的 PYTHONPATH，而它排在 venv 的 site-packages
 # **前面** —— venv 里装的 numpy/Pillow/requests 会被 ROS 或工作区里的同名包顶掉，
 # 版本随 `apt upgrade` 悄悄变化（实测：venv 里 445 个包，其中 numpy/pytest/scipy

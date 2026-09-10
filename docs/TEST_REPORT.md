@@ -4,8 +4,9 @@
 并做一轮压力测试。全程 **`VLM_PROVIDER=mock` + `TTS_ENGINE=none`，未调用任何付费接口
 （qwen3.5 消耗为 0）**，也未触碰生产库 `data/scheduler.db`（前后 md5 一致）。
 
-> 长跑（浸泡 + 用例连跑 + 环境守卫）持续到 **2026-09-10 13:00**，
-> 最终数字见文末「§6 长跑结果」，在 13:00 后补齐。
+> 长跑（浸泡 + 用例连跑 + 环境守卫）**没有跑到预定的 2026-09-10 13:00**：
+> 会话结束时后台进程被一并收掉，日志目录（会话级临时目录）也随之清空。
+> 已观测到的部分见「§6 长跑结果」，缺失的部分**不做推断**。
 
 ---
 
@@ -24,12 +25,12 @@
 
 原 `.venv` 是 `include-system-site-packages = true` 建的，而这台机器的系统 Python
 就是机器人的 **ROS 2 + CUDA + torch** 环境。更要紧的是 `~/.bashrc` 里
-`source /opt/ros/humble/setup.bash` 与 tianyi 工作区，`PYTHONPATH` 带着 **11 个目录**，
+`source /opt/ros/humble/setup.bash` 与本机的 ROS 工作区，`PYTHONPATH` 带着 **11 个目录**，
 并且排在 venv 的 `site-packages` **前面**：
 
 ```
-/home/delta/RobotST/tianyi/build/tianyi_vision          ← 别的用户的家目录，且不存在
-/home/leo/RobotST/tianyi/install/tianyi_vision/...      （共 9 个工作区目录）
+/home/<另一个用户>/<ros-ws>/build/<pkg>                   ← 别的用户的家目录，且不存在
+/home/<本机用户>/<ros-ws>/install/<pkg>/...              （共 9 个工作区目录）
 /opt/ros/humble/lib/python3.10/site-packages
 /opt/ros/humble/local/lib/python3.10/dist-packages
 ```
@@ -38,7 +39,7 @@
 
 | | 改造前 | 改造后 |
 |---|---|---|
-| venv 里可见的包 | **445 个**（含 `rclpy` `ros2cli` `tf2-*` `moveit-*` `slamware_ros_sdk` `torch 2.13+cu132` `ultralytics` `PyQt5` …）| **55 个** |
+| venv 里可见的包 | **445 个**（含 `rclpy` `ros2cli` `tf2-*` `moveit-*` 若干内部 ROS 包、`torch+cu13x` `ultralytics` `PyQt5` …）| **55 个** |
 | `sys.path` 里的外来目录 | 11 个 | **0 个** |
 | 同时存在两个版本的包 | numpy(1.21.5/1.26.0)、pytest(6.2.5/8.4.2)、scipy、matplotlib、PyYAML、sympy… | 无 |
 | 关键包的实际来源 | `requests`/`PIL` 来自 **apt**（`/usr/lib/python3/dist-packages`）、`numpy` 来自 **`~/.local`** | 全部来自 venv 内部 |
@@ -106,14 +107,33 @@
 4. 缺端口预检 + 子进程不成组 → 上一次被 `timeout` 掐掉的残留占着端口，
    而健康检查却打在**陌生实例**上，看起来「起来了」。
 
-## 6. 长跑结果（2026-09-09 23:46 → 2026-09-10 13:00）
+## 6. 长跑结果（只跑了 8 分钟，被中断）
 
-三条并行，全部 mock、零 API 消耗：
+三条并行任务于 2026-09-09 **23:46 启动**，计划跑到 09-10 13:00，全部 mock、零 API 消耗：
 
-| 任务 | 内容 |
-|---|---|
-| 浸泡测试 | 22 类场景轮换，`scripts/soak.py --until 2026-09-10T13:00`，端口 39301/18531 |
-| 全量用例连跑 | `pytest` 反复跑（每次约 4 分），失败留完整输出 |
-| 环境隔离守卫 | 每 20 分钟确认 venv 仍是 55 包 / 0 外来路径 |
+| 任务 | 计划 | 实际观测到的（截至 23:54） |
+|---|---|---|
+| 浸泡测试 | 22 类场景轮换到 13:00 | **39 轮，0 失败**；RSS 78–86 MB 区间波动、线程 33、fd 29 全程不变 |
+| 全量用例连跑 | `pytest` 反复跑 | **第 1 次 118/118 通过**（242 秒）|
+| 环境隔离守卫 | 每 20 分钟检查 | **1 次，✅**（55 包 / 0 外来路径 / 0 个 venv 外的包）|
 
-**最终数字待 13:00 后补齐。**
+**为什么只有 8 分钟**：这三条是会话内的后台进程，会话结束时被一并收掉；
+日志与浸泡数据目录在会话级临时目录下，也随之清空。**23:54 之后没有任何数据，不做推断。**
+
+要补这一段，重跑即可（三条命令都在仓库里，互不依赖）：
+
+```bash
+# ① 浸泡（22 类场景，跑到指定时刻；不消耗任何付费接口）
+env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 \
+  nohup .venv/bin/python -u scripts/soak.py --until "2026-09-11T13:00" \
+  --port 39301 --mock-port 18531 --dir ~/ps-soak > ~/ps-soak.log 2>&1 &
+
+# ② 全量用例（单次约 4 分）
+make test
+
+# ③ 环境隔离自检（确认 venv 没被 PYTHONPATH 污染）
+./bootstrap.sh
+```
+
+想让它真的跑一夜而不依赖会话，用 `setsid` 或 systemd user 单元起浸泡那条
+（`systemd-run --user --unit=ps-soak …`），否则会话一结束进程就没了 —— 这次就是这么丢的。
