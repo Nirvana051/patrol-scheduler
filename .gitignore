@@ -10,6 +10,5 @@ __pycache__/
 .pytest_cache/
 .venv/
 .venv.old/
-.venv.new/
 *.log
 shots/

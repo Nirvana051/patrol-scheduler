@@ -1,5 +1,38 @@
 # 变更记录
 
+## [0.4.10] - 2026-09-10 —— 只保留 Python 这一条线；文档与代码对齐
+
+**为什么**：那段跨平台重写（135 个提交，从未推送）已确认放弃，本仓库只走 Python 这一条线。
+借这次把「文档说的」和「代码做的」逐条对了一遍。
+
+**修（都是文档与代码不符，不是新功能）**
+
+- **`/api/health` 一直报 `0.1.0`**：`app/main.py` 里硬编码 `version='0.1.0'`，从 v0.1 一路漂到
+  v0.4.9 都没跟着走 —— 升级后想确认「跑的是哪一版」会被它骗。改成版本号只有一个来源
+  （`app/__init__.py` 的 `__version__`），`make docs-check` 会核对它与 CHANGELOG 最新条目一致
+  （这条检查本身也验过会红）。
+- **README 教的建 venv 方式正是会出事的那条**：`python3 -m venv --without-pip --system-site-packages`
+  —— 它就是造出「445 个包、numpy/pytest 各两个版本」的原因。改成 `./bootstrap.sh --dev`，
+  并写清 `PYTHONPATH` 这个坑与手工跑时的规避写法。
+- **`deploy/README.md` 的两条 cron 照抄跑不起来**：cron 的工作目录是家目录，而那两行用的是
+  相对路径 `.venv/bin/python` / `data/logs/` —— cron 不报错，只是静默不跑。加上 `cd`。
+- **vendored SDK 的出处写错**：`README.md` 与 `app/robot/client.py` 都写 `a23fc40`，
+  而本地拷贝的 md5 与上游 `6167083` 逐字节相同（这次用 md5 核对过）。
+- `docs/task.md` 写着 `schema 版本 v5`，代码是 v6。
+- `docs/HANDOFF.md`：仓库状态（81 提交、`main` 已推送、用 SSH）、
+  **qwen3.5-flash 已在真机判读 26 次**（原文写「只差 DashScope 密钥没实测过」），
+  并把三条环境坑（`PYTHONPATH` 顶包、venv 里没有 pip、Pillow 12 变严格）写进 §5.4。
+- `docs/TODO.md`：T30（yaw 对齐超时）已由机器人侧解决 → 移入「已解决」并留下回归验证方法；
+  T10 按实测更新（缺的不是密钥，是**人工标注**：0 条改判 → `make eval` 没样本）；
+  删掉与那段重写相关的条目。未决条目 25 → 23。
+- `docs/README.md` / `README.md` / `docs/TEST_PLAN.md` §0 / `docs/HANDOFF.md` §3 §9：
+  统一指向 `bootstrap.sh` 与 `docs/TEST_REPORT.md`。
+
+**清理**
+
+- 删掉那段重写留下的 1.2 GB 磁盘残留（`node_modules` 655 MB、`dist` 480 MB、
+  以及被替换掉的旧 `.venv.old` 85 MB），以及相关分支与标签。
+
 ## [0.4.9] - 2026-09-09 —— Ubuntu 上的环境稳定性
 
 **为什么**：这台机器的系统 Python 就是机器人的 ROS 2 + CUDA + torch 环境，而 `~/.bashrc`

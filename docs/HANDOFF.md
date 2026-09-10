@@ -9,7 +9,7 @@
 certaintyX 机器狗云端 API（`https://certaintyx.sg:8443`，教程仓库 [kafeiyin00/Sample_web_api](https://github.com/kafeiyin00/Sample_web_api)）之上的**本地网页巡检调度台**：
 SQLite 管任务航点/任务/执行/事件；**分段下发**（机器狗不能在航点暂停）；到点抓全景 → 按角度裁切 → VLM 判「是/不是」→ 按答案模版 TTS 播报。
 
-代码 `/home/leo/agent/scheduler/`（git，76 提交，tag `v0.1.0` … `v0.4.6`；远端 `https://github.com/Nirvana051/patrol-scheduler.git`，**尚未推送**——见 §8）。
+代码 `/home/leo/agent/scheduler/`（git，81 提交，tag `v0.1.0` … `v0.4.7`；远端 `git@github.com:Nirvana051/patrol-scheduler.git`（公开），**`main` 已推送**——见 §8）。
 主管理文档是 `../Sample_web_api/docs/task.md`（那边未被上游仓库跟踪），`docs/task.md` 是它的同步副本，用 `scripts/sync_task_doc.sh` 同步。
 
 ## 2. 现状（一句话版）
@@ -17,12 +17,13 @@ SQLite 管任务航点/任务/执行/事件；**分段下发**（机器狗不能
 - 真机密钥在 `config/.env`（gitignored）。**别再 `cp config/env.example config/.env`** —— 09-04 干过一次，把密钥覆盖成占位符，结果全是 401。
 - **配置优先级：`settings` 表 > `config/.env` > 代码默认值**。用户在网页上改过的项会存进库并盖掉 `.env`；`start.sh --mock` 导出的 mock 环境变量也会被盖掉（T27，变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`）。查当前生效值：`GET /api/settings` 或直接看 `settings` 表。
 - mock 上全流程 + 通宵 104 趟稳定；**真机（Gazebo）09-05 夜跑通完整流程**并通宵 56 趟零失败；09-07 用户自己在另一台真机（工厂/实验室场景，33 点地图）上跑通 `lab巡逻`，机头已校准（`FORWARD_DEG=269.3`）。
-- VLM 通路已就绪（`qwen` = DashScope 兼容模式），**只差 DashScope 密钥**没实测过真判读（T10）。
+- VLM **已用真模型实测**：`qwen3.5-flash`（DashScope 兼容模式）在真机上判读过 **26 次**（09-07 21:04 → 09-10，用户自己跑的）；库里共 591 条检查、216 趟执行。剩下的缺口是**准确率还没系统评过**（0 条人工改判 → `make eval` 没有标注可用，T10）。
 
 ## 3. 怎么跑
 
 ```bash
 cd /home/leo/agent/scheduler
+./bootstrap.sh --dev  # 换机器/首次：建隔离 venv + 按 requirements.lock 装依赖 + 自检（约 10 s）
 ./start.sh            # 按 config/.env 启动（真机），后台，打开 http://127.0.0.1:8088
 ./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统，不需要任何凭据
 ./start.sh --audio    # 叠加：本机播报服务 127.0.0.1:5566
@@ -80,6 +81,19 @@ make seed             # 仿真下灌演示数据并跑一趟
 18. 无头 Chrome 遇 SSE 长连接不结束 → 页面加 `?nosse=1`。
 19. 前端资源已设 `no-cache`；老部署上「改了 UI 看不到」要硬刷新（Ctrl+Shift+R）。
 20. **换机器部署先看换行符**：仓库经 Windows 中转/在 Windows 上 clone 后 `*.sh` 变 CRLF，`bash` 直接报 `‘bash\r’: No such file or directory`。已加 `.gitattributes`（`* text=auto eol=lf`）从源头堵住；老 clone 用 `sed -i 's/\r$//'` 修。同时 `requirements.txt` 原先把 Pillow/requests/numpy 当"系统装好的"，新机器上会缺——现已列全。解释器可用 `PS_PYTHON` 指到自己的环境。
+21. **`PYTHONPATH` 会把 venv 里的包顶掉**（这台机器上最容易中的一条）：`~/.bashrc` 里
+    `source /opt/ros/*/setup.bash` 会设置 `PYTHONPATH`（11 个目录），它排在 venv 的
+    `site-packages` **前面**。原先的 `.venv` 又是 `--system-site-packages` 建的，于是 venv 里
+    能看到 **445 个包**（整个 ROS 2 + torch + CUDA），numpy/pytest/scipy 各有两个版本并存，
+    `requests`/`PIL` 实际来自 apt、`numpy` 来自 `~/.local` —— **`apt upgrade` 一动，import 到的东西就变了**。
+    现在：`bootstrap.sh` 建**隔离** venv（`include-system-site-packages=false`，**55 个包**），
+    `start.sh` / `run.sh` / `Makefile` / systemd 单元启动前都清掉 `PYTHONPATH`。
+    **手工直接跑 `.venv/bin/python` 仍会中招** —— 要么走 `make`，要么
+    `env -u PYTHONPATH PYTHONNOUSERSITE=1 .venv/bin/python …`（T32）。
+22. **venv 里原先没有 pip**，而系统 python 的 `ensurepip` 也被删了 —— `python3 -m venv` 建不出
+    能用的环境。`bootstrap.sh` 优先用 `uv`，都没有时明确告诉你装哪个（`python3-venv` 或 `uv`）。
+23. **Pillow 12 比 Pillow 9 严格**：`rectangle` 收到 `x1 < x0` 会直接 `ValueError`（9 是静默吞掉）。
+    升级依赖后必跑 `tests/test_pano.py` —— 合成图里的门扇矩形就是这么暴露的（在小图上一直没画出来过）。
 
 ## 6. mock 网关能仿什么
 
@@ -94,9 +108,11 @@ make seed             # 仿真下灌演示数据并跑一趟
 
 ## 8. 仓库与推送状态
 
-- 远端已配：`origin https://github.com/Nirvana051/patrol-scheduler.git`（用户选择**公开**）。
-- 全部 76 个提交的作者/提交者已改写为 `Zhongyuan Liu <zliu051@e.ntu.edu.sg>`（GitHub 按邮箱归属）；改写前的备份分支 `backup-stengg-email`，内容 diff 为空。
-- **还没推**：HTTPS 推送需要用户名 `Nirvana051` + Personal Access Token；或把 `~/.ssh/id_ed25519.pub` 加到 GitHub 后改用 SSH 远端。
+- 远端：`origin git@github.com:Nirvana051/patrol-scheduler.git`（用户选择**公开**）。**用 SSH**——
+  `~/.ssh/id_ed25519` 已加到 GitHub，`ssh -T git@github.com` 通；HTTPS 那条没有凭据助手，别用。
+- **`main` 已推送**（09-10）。之前的作者改写：全部提交的作者/提交者已改为
+  `Zhongyuan Liu <zliu051@e.ntu.edu.sg>`（GitHub 按邮箱归属）；改写前的备份分支 `backup-stengg-email`，内容 diff 为空。
+- 分支 `V1` 是当前工作分支。曾经有过一段跨平台重写（135 个提交，从未推送），**已确认放弃并删除**。
 - 公开前已脱敏：另一台机器人的别名换成占位符；`ntu-dog-00001` / `R30_2026_001` / `cam-1c697ada870c` 保留（上游公开仓库文档里本来就有）。全历史扫过：无任何真实密钥，`config/.env` 与 `data/` 从未提交。
 - 公开仓库还缺 LICENSE（选哪个是用户的决定）。
 
@@ -108,6 +124,7 @@ make seed             # 仿真下灌演示数据并跑一趟
 | [task.md](task.md) | 总纲：宪法约束（C1–C16）、术语、架构、数据模型、业务流程、接口清单、进度、问题清单、规划 |
 | [OPERATIONS.md](OPERATIONS.md) | 真机上线与安全细则、故障速查表 |
 | [TEST_PLAN.md](TEST_PLAN.md) | 分步验收清单（含真机实测参考值与演练结果） |
+| [TEST_REPORT.md](TEST_REPORT.md) | 最近一轮测试报告（含 `.venv` 隔离改造的前后对比）|
 | [DEVLOG.md](DEVLOG.md) | 逐时开发日志（每个 bug 的现象→定位→修法都在这里） |
 | [TODO.md](TODO.md) / [ROADMAP.md](ROADMAP.md) | 问题清单 / 未来规划（都由 task.md 同步生成） |
 | [SCREENSHOTS.md](SCREENSHOTS.md) | 界面截图与真机全景样张 |

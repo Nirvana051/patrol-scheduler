@@ -5,7 +5,7 @@
 > 本文档在 `Sample_web_api` 里**未被 git 跟踪**（上游仓库 `kafeiyin00/Sample_web_api` 会持续演进），`git clean` 会删掉它 —— 以 `scheduler/docs/task.md` 的副本为备份。
 
 - 开发时段：2026-09-03 22:00 → 2026-09-04 08:00（CST）
-- 环境：Ubuntu 22.04，Python 3.10（venv `scheduler/.venv`，`--system-site-packages`），无 Node，有 ffmpeg / Chrome（无头截图验收）/ GPU
+- 环境：Ubuntu 22.04，Python 3.10（**隔离** venv `scheduler/.venv`，`include-system-site-packages=false`，用 `./bootstrap.sh` 建；不要用 `--system-site-packages`，见 §12）；无 Node；有 ffmpeg / Chrome（无头截图验收）/ GPU
 - 真机凭据：开发期间**没有 `CX_KEY`**，全程对着自建的 **mock 云端网关**进行；09-04 13:56 拿到密钥后已切到真机（`config/.env`），只读冒烟见 §9 T1
 
 ---
@@ -68,7 +68,7 @@ FastAPI（scheduler/app，单进程多线程）
    ├─ robot/client        SDK 包装：限速令牌桶、robotId 缓存、透传
    ├─ robot/events        常驻 SSE 监听线程（since 游标续接，断线重连，落库，广播）
    ├─ robot/status        状态轮询线程（telemetry/position/task，≥2s）
-   ├─ planning/graph      导航航点图：四元数→yaw、最近航点、BFS 最短路
+   ├─ planning/graph      导航航点图：四元数→yaw、最近航点、**Dijkstra** 最短路（按欧氏距离加权，不是 BFS 的最少跳数）
    ├─ executor/runner     执行状态机：分段下发 → 等到达 → 检查 → 下一段
    ├─ executor/inspection 抓图 → 角度裁切 → VLM → TTS
    ├─ media/snapshot      RtspFfmpegSource | SyntheticPanoSource | FileSource
@@ -147,7 +147,7 @@ schema 版本 v5：空库一次建全，旧库按版本 `ALTER/CREATE` 增量迁
 [确定起点]  任务里指定了 start_node → 用它（并核对机器人实际距它多远，超 start_node_max_distance 只警告；该航点不在地图里则直接拒绝执行）
             未指定 → pos=/position → 最近导航航点 cur（>3m 则警告）；读不到位姿 → 假定在首个任务航点
 for 每个任务航点 T（按 seq）:
-   [规划]   route = BFS(cur → T.nav_node)（neighbors 图）；cur==目标 → 无需导航
+   [规划]   route = Dijkstra(cur → T.nav_node)（neighbors 图，边权=欧氏距离）；cur==目标 → 无需导航
    [下发]   cursor = events().seq            ← 必须在下发前（C10）
             先订阅事件队列，再取游标，再 POST /task {map_name, path=route}  Idempotency-Key=ps-{instance}-r{run}-l{seq}-a{attempt}（C3，每次下发换新键）
    [等待]   消费 cloud_seq>cursor 的事件：
@@ -312,17 +312,36 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 | T27 | `settings` 表里的 `CX_*` 覆盖 `config/.env`，`start.sh --mock` 导出的 mock 环境变量因此失效（库里现存 `CX_ROBOT=<另一台机器人的别名>`） | `--mock` 会连 mock 网关却去找这台机器人，事件流连不上 | 变通：`PS_DB_PATH=/tmp/mock.db ./start.sh --mock`（另起一个库，也顺带不污染真机统计）。彻底做法：给 mock 模式独立数据目录，或加「环境变量优先」开关 |
 
+| T36 | **崩溃（kill -9 / 断电 / OOM）后重启，只对账数据库，不会去停云端任务** —— 实测后端被杀后机器狗又走了 3.3 m 且云端任务一直 active，重启后仍是 active（两版行为一致，`npm run crash-test` 可复现） | 重启后系统认为「没有执行在跑」，但现场的狗可能还在走完那一段 | 这是个**产品决定**，没动：停掉 = 崩溃后现场立刻安全；不停 = 绝不误停别人的任务（C13 红线）。可行的中间做法：重启时若云端任务 active，就拿库里最后一段的 `path` 与幂等键去核实「确实是我们下发的」，是则停掉并记事件，否则只报警不动手 |
+
+| T38 | **反方向到点时角度范围会偏**（用户 09-08 提出，方案已议定、**尚未执行**）。现象：示范角度范围时机器人是正向开过去的，之后如果从反方向回到同一航点，机身朝向差了约 180°，同一段像素对应的物体完全不同。根因是**到点控制没有 yaw 约束** —— 云端只保证「到达该点」，不保证朝向 | 任务航点的角度范围只在「与示范时同朝向」时才准；反向巡检（回程）会框错物体，判读结果无意义 | 议定的做法（用户的简化版，**等他确认后执行**）：把角度范围从「相对机身」改成**相对建图系**存一次，每次到点再换算回来。<br>① 示范时读一次机器人在建图系里的 yaw（`telemetry.global_localization`，与 `/position` 的 yaw 同源），把示范角度换成建图系方位角存下来；<br>② 每次到该航点、稳定后再读一次当前 yaw，用同样的差值换算回图像列。<br>数学上 `φ_image = FORWARD_DEG + s·(β_map − yaw_now)`：**差值形式里 FORWARD_DEG 会消掉**，所以机头零点的标定误差不影响这条链；唯一的未知量是符号 `s = ±1`（相机的手性 —— 全景是从里往外看还是从外往里看）。<br>**注意**：手性是一次反射（det = −1），不在 SO(3) 里，所以**换成四元数解决不了**（用户问过）；只能靠**一次图像↔世界的观测**定下来：让机器人朝一个已知地标停住，看该地标落在全景的哪一列，比一次就知道 s 是 +1 还是 −1，之后写进配置。<br>落地时的兼容性：给 `task_waypoints` 加 `angle_frame`（`body` \| `map`，默认 `body` = 现有行为）与 `yaw_at_demo`，老数据一行不改照旧工作；新建/重新示范时才写 `map`。<br>另外 T7 那条（到点后机身可能仍在减速/转向）与这条是同一件事的两面：`settle_seconds` 之后**再读一次 yaw**比在 `waypoint_reached` 瞬间读要准 |
+
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
 |---|------|-----------|
 | T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
-| T10 | 真 VLM 效果未验证（mock 只交替回答） | 通路已就绪：`qwen` 提供方（DashScope 兼容模式，自动带 `enable_thinking:false`）+ `make vlm` 探针 + 编辑器「试问 VLM」+ `make eval` 评测；**待用户提供 DashScope 密钥后实测** `qwen3.5-flash` 能否读图、判读准确率 |
+| T10 | 真 VLM 的**准确率**未验证 | 通路已实测：库里有 **13 条真机判读**（用户 09-07 21:24 → 09-08 19:33 自己跑的 `lab巡逻`，`qwen3.5-flash`），全部给出 yes/no，**0 条 unknown、0 条 error**，单次耗时 4.0–10.0 s（mock 只要 ~70 ms，所以真机一次检查约 = 抓帧 3 s + 判读 5 s）。剩下的是准确率：`human_passed` 全为空，没有标注就算不出准确率 —— 在「执行监控」里对这些检查做人工复核，然后 `npm run eval`。另注意：`VLM_BASE_URL` 填了默认地址会报错（库里 09-07 21:06 那条 error 就是），留空即用官方地址 |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
 | T12 | 无登录鉴权；`TTS_COMMAND` 可在设置页改成任意命令 | 默认只绑 127.0.0.1；局域网暴露需反向代理 + 鉴权，并把危险设置移出网页 |
 | T14 | 媒体与事件无限增长 | `scripts/cleanup_media.py` 已有，需 cron 化 |
-| T15 | 前端只有无头截图 + DOM 抽查，无自动化交互测试 | 引入 Playwright（需 pip + 浏览器驱动） |
+| T15 | ~~前端只有无头截图 + DOM 抽查，无自动化交互测试~~ | **已解决**：`tools/ui_flow.js` 用 CDP 驱动真浏览器走完写操作路径（18 项），不引 Playwright（`ws` 本来就是依赖）。还能补的分支：拖角度线、上传参考图、暂停/跳过 |
+| T35 | 前端两个小毛病（**不在这次移植范围内** —— web/ 一行不改正是等价性判据，所以只记录不改） | ① 切换视图会打断上一个视图的 `load()`：`root` 已被替换，`root.querySelector('#rows').innerHTML` 抛 `Cannot set properties of null`（ui_flow 里可稳定复现，无害但会刷控制台）。② 人工改判用**原生 `prompt()`**：阻塞渲染进程、样式与整站不一致（自动化里必须 stub 掉才能继续）。建议后面顺手改掉 |
 | T18 | mock 局限：无 `nav_preprocess`/充电桩状态、无真实速度曲线、丢事件补发只部分复刻 | 真机差异回填 |
+
+| T37 | **上传大点云会吃掉几倍于文件的内存**（整块读进内存再解析：`await file.read()` 拿到 bytes，解析时又生成一份 numpy 数组）| 几百 MB 的点云会把内存打满 | 先自己抽稀再传；彻底做法是流式解析（边读边下采样），没做 |
+
+09-09 上午新增（都是**两版一致**的现有行为，实测证据与处置建议见 `scheduler/docs/TODO.md`，没在移植里单方面改）：
+
+| # | 问题 | 处置 / 状态 |
+|---|------|-----------|
+| T39 | **一趟「完成」的执行可能一条检查都没有**：检查流水线整体抛异常（写库失败/磁盘满）时按设计只记一条红事件就把段标 done，`summary.inspections=0` 而执行列表看不出异常 | 建议结束时若检查数少于应检点数就记成 `completed_with_errors` 并标黄；已用例钉住 |
+| T40 | **巡检途中删任务/删航点/重新同步地图都不拦**：接口全 200，执行照样走完（数据是安全的：`runs`/`inspections` 都快照了名字、统计不 join 航点表） | 建议有执行在跑且引用到它时返回 409；已用例钉住 |
+| T41 | **抓到一帧解不开的「图」时，库里留一个指向碎图的路径**：`image_path` 在 `loadImage()` 抛错之前就写好了 | 一行的事（把 `loadImage` 挪到 `saveJpeg` 之前），两版一起改 |
+| T42 | ~~一次没能复现的偶发用例失败~~ | **已定位可关**：门禁日志的时间戳是**结束**时间，那一轮跨过了我改用例的窗口。20 次失败里 16 次是打包换 ABI、4 次是我改用例，产品问题 0 次 |
+| T43 | **停机期间错过的定时巡检，开机后会立刻补跑**：下次时刻正确前移、不重复触发，但机器狗会在没人预期的时间自己动起来，界面上也没有「这是补跑」的提示 | 建议给「过期超过 N 分钟就跳过并记事件」的选项；已用例钉住 |
+| T44 | **重新建图后任务航点会悄悄改去「最近的那个」，多远都照走**：实测 109 m 也照走照检查，只记一条 warn。正道（`retarget` 带 `max_distance` 与逐点报告）已经有了 | 建议给这个回退加距离阈值，超了就让这一段失败并提示先做 retarget；已用例钉住 |
+| T45 | **空 prompt 的任务航点会播报「无法判断，请人工复核」并计进「无法判断」统计**：只读体检线上库发现 **579 条检查里 59 条 unknown 100% 都是这么来的**（模型自己 0 条），直接误导 T10 的准确率评估 | **用户侧可立刻做**：给「回到-12」「航点76」填 prompt 或从检查列表去掉。产品侧建议空 prompt 不播报、统计里与真 unknown 分开 |
 
 ### 9.3 已解决（留档）
 T29 前置检查失败时（我们一次都没下发过）执行器仍发 `DELETE /task`，会停掉**不是我们下发的**任务（现场有人的巡检、或机器人重定位留下的空任务）。改为只停自己下发过的；前置提示改为写清云端任务的地图/航点数/目标，并认出「路径为空 = 重定位残留」。附带：真机实测**机器人端重定位期间任务状态就是 NAVIGATING（地图与路径都为空）**——刚点过「定位」就执行必然被前置检查拦，这是 09-07 现场 7 次被拦的全部原因；mock 加 `/mock/relocalizing` 复现。
@@ -378,3 +397,34 @@ make seed                                  # 另开终端：灌演示数据、�
 拿到真机密钥后：填 `config/.env` → `make smoke`（只读）→ 上游 `04_verify_flow.py` → 按 `docs/OPERATIONS.md` 初始化并跑单航点任务。
 
 当前开发实例（本机已在跑）：调度系统 http://127.0.0.1:8088（pid 见 `data/app.pid`），mock 网关 http://127.0.0.1:18443（`scripts/dev_restart.sh` 可重启两者）。通宵每 3 分钟一趟的计划已停用，保留每天 07:30 / 19:30 的演示计划；执行记录、检查、事件都在「执行监控」「任务事件」里，日志在 `data/logs/app.log`。
+
+---
+
+## 12. 已放弃的跨平台重写（留档）
+
+2026-09-08 夜到 09-09，为了「换一台机器 `git clone` 下来就能跑」，把整套后端用 Node 重写了一遍
+并用 Electron 封装成桌面应用（135 个提交，从未推送）。**2026-09-10 决定放弃，只保留 Python 这一条线**，
+相关分支与标签已删除。这里只留结论，不留方案。
+
+**为什么当初要做**：换机器就跑不起来 —— bash 脚本 + CRLF 换行 + 现场装对 Python 与 Pillow/numpy/ffmpeg。
+
+**放弃之后，那个问题怎么解**：根因其实不在语言。09-09 夜查清楚了：这台机器的 `.venv` 是
+`--system-site-packages` 建的，而系统 Python 就是机器人的 ROS 2 + CUDA 环境；更要紧的是
+`~/.bashrc` 里 `source /opt/ros/*/setup.bash` 会设置 `PYTHONPATH`，它排在 venv 的
+`site-packages` **前面**，把 venv 里装的包顶掉 —— venv 里能看到 **445 个包**，
+numpy/pytest/scipy 各有两个版本并存，`apt upgrade` 一动 import 到的东西就变了。
+换成隔离 venv（**55 个包**）+ 启动前清 `PYTHONPATH` 之后，
+`git clone` → `./bootstrap.sh --dev`（约 10 秒）→ `pytest` 118/118 已经验过。
+详见 `scheduler/docs/TEST_REPORT.md`。
+
+**那一段里真正有价值、已经并回来的**：
+
+- 对着 pydantic 逐字段扫请求体校验时抓到的 6 处问题（含急停 `{"active":"false"}` 会**下发**急停、
+  人工改判 `"false"` 会记成**通过**）—— 这些是 **Python 侧本来就有的缺陷**，当时都在 Python 版修了。
+- 「文档写着但从来没人真跑过」那一轮复查：上线手册第一步就是那条会覆盖密钥的 `cp`、
+  systemd 的 `ExecStop` 是空操作、cron 那两行没有 `cd` 照抄跑不起来 —— 都已修。
+- 只读体检线上库得出的结论：**「无法判断」几乎全是空 prompt 造成的，不是模型判不出来**（T10）。
+- 浸泡测试的 22 类场景设计，已移植成 `scheduler/scripts/soak.py`。
+
+**教训**：跨平台的痛点要先定位到具体机制（这里是 `PYTHONPATH` 的搜索顺序），
+再决定要不要换语言。先换语言的话，同一个坑在新语言里以别的形式重现的概率不低。

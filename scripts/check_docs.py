@@ -8,7 +8,7 @@
   1. 文档间的相对链接与截图路径是否存在
   2. 文档里提到的 `make xxx` 目标是否真的在 Makefile 里
   3. 文档里提到的脚本/目录路径是否存在
-  4. 用例数、schema 版本这类会漂移的数字是否与代码一致
+  4. 用例数、schema 版本、版本号这类会漂移的数字是否与代码一致
   5. 文档里引用的任务选项名与设置项名是否真的存在
 
 DEVLOG / CHANGELOG / task.md / TODO.md 里的数字是**历史记录**（「当时是 89 个用例」是对的），
@@ -37,6 +37,16 @@ def main() -> int:
     schema = re.search(r'SCHEMA_VERSION = (\d+)', (ROOT / 'app/db.py').read_text(encoding='utf-8')).group(1)
 
     problems: list[str] = []
+
+    # 版本号只有一个来源（app/__init__.py 的 __version__），CHANGELOG 的最新条目必须与它一致。
+    # 原来 app/main.py 里硬编码 version='0.1.0'，从 v0.1 一路漂到 v0.4.8 都没人发现 ——
+    # /api/health 一直报 0.1.0，升级后想确认「跑的是哪一版」会被它骗。这条就是钉住它。
+    from app import __version__ as code_version
+    top = re.search(r'^## \[([0-9][^\]]*)\]', (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'), re.M)
+    if not top:
+        problems.append('CHANGELOG.md: 找不到形如 `## [x.y.z]` 的最新条目')
+    elif top.group(1) != code_version:
+        problems.append(f'版本号不一致：app/__init__.py 是 {code_version}，CHANGELOG 最新条目是 {top.group(1)}')
     for d in docs:
         s = d.read_text(encoding='utf-8')
         rel = d.relative_to(ROOT)
@@ -49,7 +59,7 @@ def main() -> int:
         for target in sorted(set(re.findall(r'make ([a-z-]+)', s))):
             if f'\n{target}:' not in makefile:
                 problems.append(f'{rel}: make {target} 不存在')
-        for path in sorted(set(re.findall(r'`(scripts/[a-z_]+\.py|deploy/[a-z-]+\.(?:service|md)|audio_server|config/env\.example|start\.sh)`', s))):
+        for path in sorted(set(re.findall(r'`(scripts/[a-z_]+\.py|deploy/[a-z-]+\.(?:service|md)|audio_server|config/env\.example|start\.sh|run\.sh|bootstrap\.sh|requirements\.lock)`', s))):
             if not (ROOT / path).exists():
                 problems.append(f'{rel}: 路径 {path} 不存在')
         for opt in sorted(set(re.findall(r'`(start_node|start_node_max_distance|settle_seconds|leg_timeout|not_started_timeout|'
@@ -69,7 +79,7 @@ def main() -> int:
                 if v != schema:
                     problems.append(f'{rel}: 写着 schema v{v}，实际 v{schema}')
 
-    print(f'代码实际：{tests} 用例 · schema v{schema} · {len(docs)} 篇文档')
+    print(f'代码实际：v{code_version} · {tests} 用例 · schema v{schema} · {len(docs)} 篇文档')
     if problems:
         print('❌ 需要修：')
         for p in problems:

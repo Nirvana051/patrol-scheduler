@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SDK 包装：在 certaintyx.RobotClient 之外只加两件事 —— 全局限速令牌桶（C4）和模式判断。
 
-不改 SDK 本身（app/vendor/certaintyx.py 是 Sample_web_api 仓库 a23fc40 的原样拷贝）。
+不改 SDK 本身（app/vendor/certaintyx.py 是 Sample_web_api 仓库 6167083 的原样拷贝）。
 所有对云端的调用都要经这里，这样 5 rps 的限流预算是全局统一的：
 状态轮询、事件监听、执行器、页面上的手动操作共用一个桶。
 """

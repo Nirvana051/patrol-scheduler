@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import __version__
 from app.api import backup, events, maps, robot, runs, schedules, settings, stats, stream, task_waypoints, tasks
 from app.config import Config
 from app.context import AppContext
@@ -65,7 +66,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
         finally:
             ctx.stop()
 
-    app = FastAPI(title='巡检调度系统', version='0.1.0', lifespan=lifespan, docs_url='/api/docs', openapi_url='/api/openapi.json')
+    app = FastAPI(title='巡检调度系统', version=__version__, lifespan=lifespan, docs_url='/api/docs', openapi_url='/api/openapi.json')
     app.state.ctx = ctx
 
     @app.exception_handler(RobotError)
