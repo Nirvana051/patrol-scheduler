@@ -28,13 +28,13 @@ cd /home/leo/agent/scheduler
 ./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统，不需要任何凭据
 ./start.sh --audio    # 叠加：本机播报服务 127.0.0.1:5566
 ./start.sh --status | --stop | --restart
-make test             # 118 用例，约 4 分钟；make lint
+make test             # 138 用例，约 4 分钟；make lint
 make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 make vlm              # VLM 连通性探针（接新模型先跑这个）
 make seed             # 仿真下灌演示数据并跑一趟
 ```
 
-日志 `data/logs/app.log`（应用）与 `data/logs/app.out`（stdout）；pid 在 `data/run/`；库 `data/scheduler.db`（schema **v6**）。
+日志 `data/logs/app.log`（应用）与 `data/logs/app.out`（stdout）；pid 在 `data/run/`；库 `data/scheduler.db`（schema **v7**）。
 
 ## 4. 代码地图（改哪儿）
 

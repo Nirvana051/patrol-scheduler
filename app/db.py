@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = Path(__file__).resolve().parent / 'schema.sql'
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def now_iso() -> str:
@@ -121,6 +121,13 @@ class Database:
             c.execute("UPDATE events SET gateway='legacy' WHERE cloud_seq IS NOT NULL")
             c.execute('CREATE UNIQUE INDEX IF NOT EXISTS events_gw_seq ON events(gateway, cloud_seq) WHERE cloud_seq IS NOT NULL')
             c.execute('INSERT INTO schema_version(version) VALUES (6)')
+        if v < 7:
+            # 抓帧体检的留档：接入直播流时可能抓到「还没收敛」的画面（上下恒定的竖带），
+            # 而 ffmpeg 那时退出码仍是 0 —— 以前这种糊图会被静默送去判读。
+            # 存下每次抓帧的纵向细节度与尝试次数，事后能审计「哪些判读是基于坏图做的」。
+            for col in ('frame_score REAL', 'frame_attempts INTEGER'):
+                c.execute(f'ALTER TABLE inspections ADD COLUMN {col}')
+            c.execute('INSERT INTO schema_version(version) VALUES (7)')
 
     def version(self) -> int:
         row = self.conn().execute('SELECT MAX(version) AS v FROM schema_version').fetchone()

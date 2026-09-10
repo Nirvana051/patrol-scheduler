@@ -43,7 +43,8 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
     row = {'run_id': run_id, 'leg_id': leg.get('id'), 'task_waypoint_id': tw.get('id'), 'waypoint_name': name,
            'prompt': tw.get('prompt') or '', 'angle_from': af, 'angle_to': at, 'image_path': None, 'crop_path': None,
            'vlm_provider': ctx.vlm.describe(), 'vlm_raw': '', 'answer': 'error', 'expected': (template or {}).get('expected', 'yes'),
-           'passed': None, 'tts_text': None, 'tts_audio_path': None, 'tts_status': None, 'latency_ms': 0, 'capture_pose': None}
+           'passed': None, 'tts_text': None, 'tts_audio_path': None, 'tts_status': None, 'latency_ms': 0, 'capture_pose': None,
+           'frame_score': None, 'frame_attempts': None}
     run_dir = ctx.media_dir / 'runs' / str(run_id)
     stem = f"leg{int(leg.get('seq', 0)):02d}_tw{tw.get('id')}_{time.strftime('%H%M%S')}"
 
@@ -52,10 +53,29 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         pose = ctx.status.get().get('position') if ctx.status else None
         row['capture_pose'] = dumps(pose) if pose else None
         ctx.log_event('snapshot', f'{name}：抓取全景', run_id=run_id, leg_id=leg.get('id'), data={'pose': pose})
-        data = ctx.snapshot.grab({'waypoint': tw, 'run_id': run_id})
+        grab_ctx: dict = {'waypoint': tw, 'run_id': run_id}
+        data = ctx.snapshot.grab(grab_ctx)
+        # 抓帧体检的结果（只有 ffmpeg 抓真实流的源会写；synthetic/file 不体检）
+        qc = grab_ctx.get('quality') or {}
+        row['frame_score'] = qc.get('detail')
+        row['frame_attempts'] = qc.get('attempts')
         p_full = save_jpeg(data, run_dir, f'{stem}_pano')
         row['image_path'] = str(p_full.relative_to(ctx.media_dir))
         img = Image.open(io.BytesIO(data)).convert('RGB')
+        if qc and not qc.get('ok'):
+            # 重抓过 attempts 次仍不合格：图留下来给人看，但**不拿它去问模型** ——
+            # 糊图上的判读没有意义，而且每次都是一次真金白银的付费调用。
+            row['answer'] = 'error'
+            row['vlm_raw'] = (f"抓帧体检不合格，已跳过判读：{qc.get('reason')}"
+                              f"（试了 {qc.get('attempts')} 次）")
+            ctx.log_event('snapshot_degraded',
+                          f"{name}：抓到的画面不可用，跳过判读 —— {qc.get('reason')}（试了 {qc.get('attempts')} 次）",
+                          level='error', run_id=run_id, leg_id=leg.get('id'), data=qc)
+            return _finish(ctx, row, template, name, t0)
+        if qc.get('attempts', 1) > 1:
+            ctx.log_event('snapshot_retried',
+                          f"{name}：第 1 次抓到的画面没通过体检，重抓第 {qc['attempts']} 次才用上",
+                          level='warn', run_id=run_id, leg_id=leg.get('id'), data=qc)
     except (SnapshotError, OSError) as e:
         row['vlm_raw'] = f'抓图失败: {e}'
         ctx.log_event('snapshot_failed', f'{name}：抓图失败 {e}', level='error', run_id=run_id, leg_id=leg.get('id'))
@@ -119,7 +139,7 @@ def _finish(ctx, row: dict, template: dict | None, name: str, t0: float) -> dict
     row['created_at'] = now_iso()
     cols = ['run_id', 'leg_id', 'task_waypoint_id', 'waypoint_name', 'prompt', 'angle_from', 'angle_to', 'image_path',
             'crop_path', 'vlm_provider', 'vlm_raw', 'answer', 'expected', 'passed', 'tts_text', 'tts_audio_path',
-            'tts_status', 'latency_ms', 'capture_pose', 'created_at']
+            'tts_status', 'latency_ms', 'capture_pose', 'frame_score', 'frame_attempts', 'created_at']
     row['id'] = ctx.db.execute(f"INSERT INTO inspections({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
                                [row.get(c) for c in cols])
     ctx.bus.publish('inspection', row)

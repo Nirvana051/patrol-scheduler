@@ -44,6 +44,12 @@ DEFAULTS: dict[str, str] = {
     'TTS_TIMEOUT': '20',              # 合成超时（秒）：外部服务卡住不能拖住执行
     # 抓图 / 全景
     'SNAPSHOT_SOURCE': 'synthetic',   # rtsp | hls | synthetic | file:<path> | lavfi:<filter> | http(s)://…m3u8
+    # 抓帧体检（只对 rtsp/hls 这类 ffmpeg 抓真实流的源生效）：
+    # 接入直播流时可能正好抓到「还没收敛」的画面（一条条上下恒定的竖带）。ffmpeg 这时
+    # **退出码仍是 0**、图片照样输出，只在 stderr 里报解码错误 —— 不检查就会拿糊图去判读。
+    'SNAPSHOT_MAX_ATTEMPTS': '3',     # 体检不合格时最多重抓几次（1 = 关掉重抓）
+    'SNAPSHOT_MIN_DETAIL': '1.0',     # 画面纵向细节度下限；0 = 关掉这项体检
+                                      # 实测真机全景正常 2.58–3.84、损坏 0.17、全糊 0.00
     'FORWARD_DEG': '180',
     'SETTLE_SECONDS': '2',
     'LEG_TIMEOUT': '600',

@@ -355,6 +355,34 @@ chmod +x start.sh run.sh
 **改了 UI 却看不到变化**
 现在前端资源带 `no-cache`，普通刷新即可。若是老版本部署，按 Ctrl+Shift+R 硬刷新。
 
+**留档的全景是一条条竖条纹 / 一半正常一半糊**
+
+抓帧时接到了「还没收敛」的画面。接入一条正在直播的 H.264 流时，解码器往往从刷新周期中间开始，
+画面要一个刷新周期才收敛；这一刻抓下来就是上下恒定的竖带。链路越慢越容易撞上
+（真机实测抓一帧 4 s 的机器上 30 张里 1 张；抓一帧 8–13 s 的机器上比例高得多）。
+
+**这不是丢包**（抓帧走的是 `-rtsp_transport tcp`），是抓帧时机。
+
+系统现在会自己处理：抓完先做两道体检 —— ① ffmpeg 的 stderr 里有没有解码错误
+（`concealing` / `no frame!` / `non-existing PPS` 之类。注意 **ffmpeg 这时退出码仍是 0、图片照样输出**，
+所以必须看 stderr）② 画面纵向细节度够不够。不合格就重抓（默认最多 3 次）；
+重抓到底仍不合格就**跳过判读**，答案记 `error`，事件里留一条红色的 `snapshot_degraded`，
+图仍然留档给你看。这样既不会拿糊图去问模型，也不白花一次付费调用。
+
+两个设置项（「设置」页或 `config/.env` 都能改）：
+
+| 设置 | 默认 | 什么时候调 |
+|---|---|---|
+| `SNAPSHOT_MAX_ATTEMPTS` | 3 | 链路很慢、重抓也常失败时可加大；设 1 = 关掉重抓 |
+| `SNAPSHOT_MIN_DETAIL` | 1.0 | 现场画面本来就极平坦（大片白墙、仿真空场景）会被误判 → 调低或设 0 关掉 |
+
+想查历史上哪些判读是基于坏图做的（`frame_score` 从 v7 开始记，老行是 NULL）：
+
+```sql
+SELECT id, run_id, created_at, waypoint_name, answer, frame_score, frame_attempts
+FROM inspections WHERE frame_score IS NOT NULL AND frame_score < 1.0 ORDER BY id DESC;
+```
+
 **一切正常但数据不更新**
 看「总览 → ROS」。为「不可用」时机器人端 ROS 挂了，接口照常返回但内容是最后一次成功读到的陈旧值。
 

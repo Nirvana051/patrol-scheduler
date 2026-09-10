@@ -16,6 +16,7 @@ DEVLOG / CHANGELOG / task.md / TODO.md 里的数字是**历史记录**（「当�
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -32,8 +33,14 @@ def main() -> int:
 
     docs = sorted((ROOT / 'docs').glob('*.md')) + [ROOT / 'README.md', ROOT / 'CHANGELOG.md', ROOT / 'deploy/README.md']
     makefile = (ROOT / 'Makefile').read_text(encoding='utf-8')
-    tests = int(subprocess.run(['bash', '-c', "grep -c '^def test_\\|^    def test_' tests/*.py | awk -F: '{s+=$2} END {print s}'"],
-                               cwd=ROOT, capture_output=True, text=True).stdout.strip() or 0)
+    # 用例数用 **pytest 自己收集到的条数**，而不是数 `def test_` 的个数 ——
+    # 有 @pytest.mark.parametrize 时两者不等（一个函数会跑成多条），
+    # 那样文档里的数字就和 `make test` 打出来的对不上（实测 131 个函数 → 138 条）。
+    _co = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q'],
+                         cwd=ROOT, capture_output=True, text=True,
+                         env={**os.environ, 'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1'})
+    # `-q` 的输出是每个文件一行「tests/test_x.py: 20」，加起来就是收集到的总条数
+    tests = sum(int(n) for n in re.findall(r'^tests/\S+\.py: (\d+)$', _co.stdout, re.M))
     schema = re.search(r'SCHEMA_VERSION = (\d+)', (ROOT / 'app/db.py').read_text(encoding='utf-8')).group(1)
 
     problems: list[str] = []

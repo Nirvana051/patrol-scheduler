@@ -115,6 +115,8 @@ CREATE TABLE IF NOT EXISTS inspections (
   human_note       TEXT,
   human_at         TEXT,
   capture_pose     TEXT,                        -- 抓图时的位姿 JSON {x,y,z,yaw}（v5）
+  frame_score      REAL,                        -- 画面纵向细节度（v7）：正常 2.5+，接近 0 = 抓到没收敛的画面
+  frame_attempts   INTEGER,                     -- 抓这一帧试了几次（v7）：>1 说明体检不合格重抓过
   created_at       TEXT NOT NULL
 );
 

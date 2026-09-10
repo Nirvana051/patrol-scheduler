@@ -56,7 +56,7 @@ make seed                                  # 灌演示数据并跑一遍
 ## 测试
 
 ```bash
-make test          # 全量 118 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
+make test          # 全量 138 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
 make lint          # ruff 静态检查（ruff.toml）
 make docs-check    # 文档体检：链接/命令/版本号/用例数/schema 版本与代码是否一致
 make shots         # 无头 Chrome 截图每个视图并收集 JS 错误（需调度系统在跑）
@@ -78,7 +78,7 @@ app/            FastAPI 后端（api/ 路由，robot/ 云端连接与线程，ex
 app/vendor/     certaintyx.py —— Sample_web_api 仓库 6167083 的 SDK 原样拷贝，不改
 web/            原生 HTML/CSS/JS 前端（无构建）
 mock_gateway/   按文档契约仿真的云端网关 + 机器狗运动学
-tests/          pytest（118 用例）
+tests/          pytest（138 用例）
 scripts/        演示数据、浸泡测试、真机冒烟、备份/清理、截图、文档体检
 docs/           管理文档副本、使用说明、上线手册、测试方案与报告、开发日志、TODO、路线图
 ```

@@ -8,7 +8,7 @@
 ## 0. 前置（10 分钟）
 
 0. 换机器/首次：`./bootstrap.sh --dev`（建隔离 venv + 按 `requirements.lock` 装依赖 + 自检），
-   然后 `make test`（118 用例）与 `make docs-check` 都应全绿。**自检里那句「每个包都来自 venv 内部」
+   然后 `make test`（138 用例）与 `make docs-check` 都应全绿。**自检里那句「每个包都来自 venv 内部」
    必须是 ✅** —— 这台机器上 ROS 的 `PYTHONPATH` 会把 venv 里的包顶掉（见 HANDOFF §5.4 第 21 条）。
 1. `make smoke`：鉴权、在线、`/position` 200（仿真自带定位）、地图 ≥1 张且有航点、`/task` 有 `active/terminal`、SSE 可连、HLS 可取。
 2. 打开 http://127.0.0.1:8088 ，顶栏应为 **REAL**、在线 ●、定位就绪 ●、云端任务 IDLE。点「刷新状态」→ 前置检查全部 ✅。

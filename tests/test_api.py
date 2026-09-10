@@ -126,10 +126,37 @@ def test_schema_migration_from_v1(tmp_path):
     assert db.query_one("SELECT name FROM sqlite_master WHERE type='table' AND name='schedules'")
     cols_i = {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
     assert 'human_passed' in cols_i and 'capture_pose' in cols_i
+    assert 'frame_score' in cols_i and 'frame_attempts' in cols_i          # v7 抓帧体检留档
     assert 'gateway' in {r['name'] for r in db.query('PRAGMA table_info(events)')}
     assert db.query_one('SELECT gateway FROM events WHERE cloud_seq=7')['gateway'] == 'legacy'
     db2 = Database(tmp_path / 'fresh.db')
     assert db2.version() == SCHEMA_VERSION and 'item_seq' in {r['name'] for r in db2.query('PRAGMA table_info(run_legs)')}
+
+
+def test_migration_v6_to_v7_adds_frame_qc_columns(tmp_path):
+    """v6 老库打开时补上抓帧体检的两列，且老行为 NULL（不是 0 —— 那会被误读成「画面全糊」）。"""
+    import sqlite3
+    from app.db import SCHEMA_VERSION, Database
+    p = tmp_path / 'v6.db'
+    c = sqlite3.connect(p)
+    c.executescript("""
+    CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(6);
+    CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, source TEXT NOT NULL, type TEXT NOT NULL,
+      cloud_seq INTEGER, run_id INTEGER, leg_id INTEGER, level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', gateway TEXT);
+    CREATE TABLE inspections(id INTEGER PRIMARY KEY, run_id INTEGER, answer TEXT, human_passed INTEGER, capture_pose TEXT, created_at TEXT);
+    INSERT INTO inspections(id, run_id, answer, created_at) VALUES(1, 1, 'yes', 't');
+    CREATE TABLE run_legs(id INTEGER PRIMARY KEY, item_seq INTEGER);
+    CREATE TABLE schedules(id INTEGER PRIMARY KEY);
+    CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+    """)
+    c.commit(); c.close()
+    db = Database(p)
+    assert db.version() == SCHEMA_VERSION
+    cols = {r['name'] for r in db.query('PRAGMA table_info(inspections)')}
+    assert 'frame_score' in cols and 'frame_attempts' in cols
+    row = db.query_one('SELECT frame_score, frame_attempts FROM inspections WHERE id=1')
+    assert row['frame_score'] is None and row['frame_attempts'] is None, '老行必须是 NULL，不能是 0'
 
 
 def test_stats_endpoint_empty(app_client):

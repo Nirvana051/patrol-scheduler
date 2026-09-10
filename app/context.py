@@ -69,7 +69,9 @@ class AppContext:
                                      rtsp_url_provider=lambda: self.gateway.rtsp_url(),
                                      hls_url_provider=lambda: self.gateway.hls_url(),
                                      pose_provider=lambda: self.status.pose() if self.status else None,
-                                     scene_provider=lambda: self.scene)
+                                     scene_provider=lambda: self.scene,
+                                     attempts=cfg.get_int('SNAPSHOT_MAX_ATTEMPTS'),
+                                     min_detail=cfg.get_float('SNAPSHOT_MIN_DETAIL'))
 
     def reconnect(self) -> None:
         """CX_* 改了之后重建网关与后台线程（不中止执行；有执行在跑时应先中止再改设置）。"""
