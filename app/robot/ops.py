@@ -75,6 +75,27 @@ class RobotOps:
         self.ctx.log_event('task_stop_requested', '已请求停止云端任务', level='warn', data=r)
         return r
 
+    # ── 机器人播报（云端 /tts，固件 ≥ 2026-09-14）─────────────────────────
+    @staticmethod
+    def _tts_error(e: RobotError) -> OpsError:
+        if e.status == 404 and isinstance(e.body, str) and '<' in e.body:
+            return OpsError('机器人固件太旧（< 2026-09-14），没有播报接口；让管理员升级固件，或改用 http 汇出（audio_server）')
+        return OpsError(str(e))
+
+    def tts_status(self) -> dict:
+        try:
+            return self.ctx.gateway.tts_status()
+        except RobotError as e:
+            raise self._tts_error(e) from e
+
+    def tts_stop(self) -> dict:
+        try:
+            r = self.ctx.gateway.tts_stop()
+        except RobotError as e:
+            raise self._tts_error(e) from e
+        self.ctx.log_event('tts_stop', f"已打断机器人播报，丢弃 {r.get('dropped', 0)} 条", level='warn', data=r)
+        return r
+
     # ── 抓图 ────────────────────────────────────────────────────────────────
     def snapshot(self, subdir: str = 'snapshots', prefix: str = 'snap') -> dict:
         try:

@@ -40,6 +40,7 @@
 | C14 | 停任务不等于停设备；收尾 = 停任务 → 停设备 → 等停完；②–④ 是一次性初始化，之后重复 ⑥⑦ 即可 | full-patrol ⑧ | 执行结束默认**不停设备**（连续多任务）；「结束作业」按钮才做完整收尾 |
 | C15 | 出异常先急停再收尾（示例脚本结构）；正常的任务失败（避障/规划失败）则停任务即可 | 03_full_patrol.py | 执行器：未预期异常 → `estop()`（可配置）+ `stop_task()`；`task_failed` → 仅 `stop_task()` 并按重试策略处理 |
 | C16 | `visited` 下发瞬间就含起点、起点会报一条到达；两次观测之间走过两个点会补发两条；重连后不会补假到达 | arrival-events | 到达判定看 `waypoint == 本段终点` 且 `nextTarget` 为空，或 `task_completed`；起点到达仅记录 |
+| C17 | 语音播报（**上游 5fe1e59，机器人固件 ≥ 2026-09-14**）：`POST …/tts` 文字 ≤ 300 字由机器人本地 piper 合成；`POST …/tts/audio` 音频 ≤ 5 MB、格式按文件头识别；两者共用一条串行队列，满 20 → 429（不带 `Retry-After`）；需控制权；`wait` 最多等 50 s 后 `pending`；`volume` 机器人会记住；旧固件对整组端点回一页 HTML 的 404 | tts.md、api-reference | 汇出 `robot`（`TTS_SINKS=robot`，v0.6.0）：默认不等播完（边走边播）；音频推不成（400/413/503）退回文字；HTML 404 识别为「固件太旧」并提示改用 `audio_server` 兜底，不重试；状态不自己抄，`GET /api/robot/tts` 透传 |
 
 ---
 
@@ -71,11 +72,11 @@ FastAPI（scheduler/app，单进程多线程）
    ├─ planning/graph      导航航点图：四元数→yaw、最近航点、**Dijkstra** 最短路（按欧氏距离加权，不是 BFS 的最少跳数）
    ├─ executor/runner     执行状态机：分段下发 → 等到达 → 检查 → 下一段
    ├─ executor/inspection 抓图 → 角度裁切 → VLM → TTS
-   ├─ media/snapshot      RtspFfmpegSource | SyntheticPanoSource | FileSource
+   ├─ media/snapshot      RtspFfmpegSource | HlsFfmpegSource | LiveStreamSource（常驻读流，到点取最新帧）| SyntheticPanoSource | FileSource
    ├─ media/pano          角度↔像素、跨缝裁切、标注
    ├─ media/pointcloud    PCD 读取 + 体素下采样（接口，后续接真机点云）
    ├─ vlm/*               MockVlm | QwenVlm（DashScope 兼容模式，自动带 enable_thinking:false）| OpenAICompatVlm（Ollama/vLLM/OpenAI）| AnthropicVlm（官方 SDK）
-   ├─ tts/*               EdgeTts | CommandTts | 汇出：浏览器 / 本机扬声器 / 自带 audio_server（HTTP，机器狗端）/ Webhook
+   ├─ tts/*               EdgeTts | CommandTts | 汇出：机器人自带扬声器（云端 /tts，固件 ≥ 2026-09-14）/ 浏览器 / 本机扬声器 / 自带 audio_server（HTTP，旧固件兜底）/ Webhook
    └─ db                  SQLite（WAL），schema.sql 迁移
    │
    ▼  HTTPS（X-API-Key）
@@ -186,7 +187,7 @@ for 每个任务航点 T（按 seq）:
 | **任务规划** | 任务 CRUD；**起始点**（指定导航航点，或「自动」= 按机器人当前位置取最近）；有序航点列表；执行选项（速度/步态/避障/稳定/各类超时/重试/丢定位策略/返回起点）；定时计划 | 从任务航点表或地图加入、就地新建任务航点；路线预览（各段路径、总长）；「执行」；「⏰ 定时」（每天固定时刻 / 每 N 分钟，立即触发） |
 | **执行监控** | 当前/历史执行；段进度时间线（含中途「已过 k/n 点」）；小地图轨迹；每个检查的全景（带范围标注）/裁切/答案/TTS；本次执行的云端 + 系统事件 | 暂停 / 跳过 / 中止；回放 TTS；人工改判；失败或中止后「从某航点重跑剩余航点」；导出本次事件 CSV |
 | **任务事件** | 云端 + 系统事件统一时间线，可按来源/类型/级别/执行/关键字过滤，实时追加 | 翻页加载更早；导出 CSV |
-| **设置** | 连接（host/别名/密钥掩码）、VLM（provider=mock/qwen/openai_compat/anthropic、base_url/model/key/额外请求字段）、TTS（引擎/声音/汇出）、抓图源、执行默认值、通知 webhook、定时器间隔、机头校准（FORWARD_DEG）、系统自检、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS |
+| **设置** | 连接（host/别名/密钥掩码）、VLM（provider=mock/qwen/openai_compat/anthropic、base_url/model/key/额外请求字段）、TTS（引擎/声音/汇出/机器人播报方式·音量·等播完·打断）、抓图源、执行默认值、通知 webhook、定时器间隔、机头校准（FORWARD_DEG）、系统自检、mock 演示场景 | 保存即生效；改 CX_* 自动重建连接；试听 TTS；机器人播报状态 / 打断 |
 
 设计语言：浅色专业控制台风格，系统字体 + Noto Sans CJK；状态色 绿/黄/红 只用于状态；所有让机器人动的操作在 REAL 模式二次确认；深色模式跟随系统。
 
@@ -216,6 +217,7 @@ GET/POST /api/task-waypoints[?map_name=] ; GET/PUT/DELETE /api/task-waypoints/{i
 POST /api/task-waypoints/{id}/reference-image          现抓一张作参考图；…/reference-image/upload 上传
 POST /api/task-waypoints/{id}/test-vlm {use,prompt,angle_from,angle_to}   试问 VLM，返回裁切图与将播报的句子
 POST /api/tts/test {text}
+GET/DELETE /api/robot/tts                   机器人扬声器状态（引擎/声卡/队列/音量）/ 打断并清空队列（云端 /tts 透传）
 GET/POST /api/tasks ; GET/PUT/DELETE /api/tasks/{id} ; GET /api/tasks/{id}/plan[?from_node=]
 POST /api/tasks/{id}/run[?from_seq=N]       执行（from_seq：从第 N 个航点重跑剩余）
 GET  /api/runs ; GET /api/runs/active ; GET /api/runs/{id}（含 legs/inspections/events）
@@ -293,6 +295,13 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 
 ---
 
+### 第四天（2026-09-14，上游新增语音播报接口）
+
+| 时间 | 事项 | 结果 |
+|------|------|------|
+| 09-15 | 用户反馈到点流程偏慢（怀疑 mp3 太大）。量化 run 247：等待 3.0 + 抓帧 0.5–2.3（抖）+ 判读 ~2 + 合成/推送/等播完 3.4–4.1 + 下发 0.7 ≈ 10–12 s/点；mp3 仅 20 KB 不是瓶颈 | `v0.7.0`：常驻读流器 `LiveStreamSource`（下发下一段时连流，到点取最新帧 ≤0.5 s，冷启动退回一次性抓帧；一次性抓帧要等关键帧、GOP≈3 s、实测 1.0–3.4 s）；播报句子任务开始时预合成进 `media/tts_cache/`；每条 `tts` 事件带分阶段耗时。用户侧改 `TTS_ROBOT_WAIT=0`、`settle_seconds` 1–2。用例 148 → 153 |
+| 09-14 | `git pull` 上游 5fe1e59：云端新增 `POST …/tts`（机器人本地合成）、`POST …/tts/audio`（播 mp3）、`GET/DELETE …/tts` | SDK 同步；新增汇出 `robot` 与四个设置项；`GET/DELETE /api/robot/tts`；mock 复刻整组端点与错误码（含旧固件 HTML 404、三种上传方式、wait 50 s → pending）；用例 138 → 148；`v0.6.0`。默认仍 `TTS_SINKS=browser`，真机建议 `robot,browser`；`audio_server` 留作旧固件兜底（C17、T2） |
+
 ## 9. 问题清单（最终版；同 `scheduler/docs/TODO.md`）
 
 ### 9.1 必须在真机上才能关闭的
@@ -319,7 +328,7 @@ POST /api/demo/scene {door_open}            mock 演示：合成全景里的柜�
 ### 9.2 功能缺口（不阻塞 mock 演示）
 | # | 问题 | 处置 / 状态 |
 |---|------|-----------|
-| T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
+| T2 | 云端 API 没有机器狗扬声器端点 | **已解决，两条路**：① **09-14 起云端有了** `POST …/tts` / `…/tts/audio`，本系统汇出 `robot`（`TTS_SINKS=robot`，v0.6.0）直接走它，要求机器人固件 ≥ 2026-09-14（C17）；② 固件没升的机器用自带 `audio_server/`（`http` 汇出）兜底。剩余：真机上把 `robot` 汇出听一次（`GET /api/robot/tts` 先看 `available` 与声卡） |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
 | T10 | 真 VLM 的**准确率**未验证 | 通路已实测：库里有 **13 条真机判读**（用户 09-07 21:24 → 09-08 19:33 自己跑的 `lab巡逻`，`qwen3.5-flash`），全部给出 yes/no，**0 条 unknown、0 条 error**，单次耗时 4.0–10.0 s（mock 只要 ~70 ms，所以真机一次检查约 = 抓帧 3 s + 判读 5 s）。剩下的是准确率：`human_passed` 全为空，没有标注就算不出准确率 —— 在「执行监控」里对这些检查做人工复核，然后 `npm run eval`。另注意：`VLM_BASE_URL` 填了默认地址会报错（库里 09-07 21:06 那条 error 就是），留空即用官方地址 |
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |
@@ -377,7 +386,7 @@ T13 外部任务识别（`task_started.path` 与本段不符 → 中止且不停
 13. 通知：Webhook 已有（检查不通过 / 执行失败中止）；后续：IM 适配（企微/飞书/Slack 模板）、日报。
 
 **R5 与现场系统打通**
-14. 机器狗端播报：已改为本项目自带 `audio_server`（T2）；后续：播报音量/打断策略、多语言声音。
+14. 机器狗端播报：09-14 起走云端 `/tts` 接口（汇出 `robot`，含音量记忆 / 打断 / 等播完），`audio_server` 留作旧固件兜底（T2）；后续：告警型播报用 `interrupt`、英文点位试 `lang=en`、用 `GET /api/robot/tts` 做前置自检。
 15. 点云自动获取（云端接口出来后接 `fetch_from_robot`，T4）；重建图后的任务航点迁移工具已有（导出/导入 + 按 x,y 重定向到新图最近航点），后续做 UI 引导与差异预览。
 16. 巡检模板库：常见点位（消防栓、通道、配电箱、指示牌）的 prompt/答案模版可复用。
 

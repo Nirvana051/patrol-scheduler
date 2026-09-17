@@ -31,9 +31,48 @@ def pick_tts(template: dict, answer: str, name: str) -> tuple[str | None, bool |
     return (text or None), passed
 
 
+def collect_tts_texts(tws) -> list[str]:
+    """一批任务航点在三种答案下会播报的全部句子（去重、去空）—— 任务开始时交给 TtsService.prewarm()。"""
+    out: list[str] = []
+    for tw in tws:
+        if not tw:
+            continue
+        template = tw.get('answer_template')
+        if isinstance(template, str):
+            template = loads(template, {})
+        name = tw.get('name') or f"航点{tw.get('nav_node_id') or tw.get('id')}"
+        for answer in ('yes', 'no', 'unknown'):
+            text, _ = pick_tts(template or {}, answer, name)
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _fmt_stages(stages: dict) -> str:
+    parts = []
+    if stages.get('pre_ms') is not None:
+        parts.append(f"到点后等 {stages['pre_ms'] / 1000:.1f} s")
+    if 'grab_ms' in stages:
+        parts.append(f"抓帧 {stages['grab_ms'] / 1000:.1f} s" + ('(常驻流)' if stages.get('grab_source') == 'live' else ''))
+    if 'vlm_ms' in stages:
+        parts.append(f"判读 {stages['vlm_ms'] / 1000:.1f} s")
+    if 'tts_ms' in stages:
+        parts.append(f"播报 {stages['tts_ms'] / 1000:.1f} s" + ('(缓存)' if stages.get('tts_cache_hit') else ''))
+    return ' · '.join(parts)
+
+
 def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.0) -> dict:
-    """返回 inspections 表的新行（dict）。任何一步失败都会记录进行，不抛出——检查失败不应中断巡检。"""
+    """返回 inspections 表的新行（dict）。任何一步失败都会记录进行，不抛出——检查失败不应中断巡检。
+
+    每一步的耗时记在 row['stages']（不落库，随 `tts` 事件与 SSE 推出去），一眼能看出慢在哪。"""
     t0 = time.time()
+    stages: dict = {}
+    if leg.get('arrived_at'):
+        try:
+            import datetime as _dt
+            stages['pre_ms'] = max(0, int((t0 - _dt.datetime.fromisoformat(leg['arrived_at']).timestamp()) * 1000))
+        except (TypeError, ValueError):
+            pass
     name = tw.get('name') or f"航点{tw.get('nav_node_id') or tw.get('id')}"
     af, at = float(tw.get('angle_from', 0)), float(tw.get('angle_to', 360))
     forward = ctx.cfg.get_float('FORWARD_DEG')
@@ -44,7 +83,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
            'prompt': tw.get('prompt') or '', 'angle_from': af, 'angle_to': at, 'image_path': None, 'crop_path': None,
            'vlm_provider': ctx.vlm.describe(), 'vlm_raw': '', 'answer': 'error', 'expected': (template or {}).get('expected', 'yes'),
            'passed': None, 'tts_text': None, 'tts_audio_path': None, 'tts_status': None, 'latency_ms': 0, 'capture_pose': None,
-           'frame_score': None, 'frame_attempts': None}
+           'frame_score': None, 'frame_attempts': None, 'stages': stages}
     run_dir = ctx.media_dir / 'runs' / str(run_id)
     stem = f"leg{int(leg.get('seq', 0)):02d}_tw{tw.get('id')}_{time.strftime('%H%M%S')}"
 
@@ -54,7 +93,10 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         row['capture_pose'] = dumps(pose) if pose else None
         ctx.log_event('snapshot', f'{name}：抓取全景', run_id=run_id, leg_id=leg.get('id'), data={'pose': pose})
         grab_ctx: dict = {'waypoint': tw, 'run_id': run_id}
+        t_grab = time.time()
         data = ctx.snapshot.grab(grab_ctx)
+        stages['grab_ms'] = int((time.time() - t_grab) * 1000)
+        stages['grab_source'] = (grab_ctx.get('grab') or {}).get('source', 'oneshot')
         # 抓帧体检的结果（只有 ffmpeg 抓真实流的源会写；synthetic/file 不体检）
         qc = grab_ctx.get('quality') or {}
         row['frame_score'] = qc.get('detail')
@@ -82,6 +124,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         return _finish(ctx, row, template, name, t0)
 
     # 2. 裁切 + 标注
+    t_crop = time.time()
     try:
         crop = pano.crop_angle_range(img, af, at, pad_deg=pad_deg)
         crop_bytes = pano.to_jpeg(crop)
@@ -90,6 +133,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         annotated = pano.annotate(img, af, at, forward_deg=forward, label=name)
         annotated_bytes = pano.to_jpeg(annotated, 80)
         save_jpeg(annotated_bytes, run_dir, f'{stem}_annot')
+        stages['crop_ms'] = int((time.time() - t_crop) * 1000)
     except Exception as e:      # noqa: BLE001
         row['vlm_raw'] = f'裁切失败: {e}'
         ctx.log_event('crop_failed', f'{name}：裁切失败 {e}', level='error', run_id=run_id, leg_id=leg.get('id'))
@@ -107,10 +151,12 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
     user = build_user_prompt(prompt, af, at, forward_deg=forward, waypoint_name=name)
     ctx.log_event('vlm_ask', f'{name}：向 VLM 提问（{ctx.vlm.describe()}）', run_id=run_id, leg_id=leg.get('id'),
                   data={'prompt': prompt, 'angle_from': af, 'angle_to': at})
+    t_vlm = time.time()
     try:
         res: VlmResult = ctx.vlm.ask_yes_no(images, user, system=SYSTEM_PROMPT)
     except Exception as e:      # noqa: BLE001
         res = VlmResult('error', provider=ctx.vlm.name, model=getattr(ctx.vlm, 'model', ''), error=str(e))
+    stages['vlm_ms'] = int((time.time() - t_vlm) * 1000)
     row['answer'] = res.answer
     row['vlm_raw'] = res.raw if not res.error else f"{res.raw}\n[error] {res.error}".strip()
     row['vlm_provider'] = f'{res.provider} {res.model}'.strip()
@@ -124,14 +170,19 @@ def _finish(ctx, row: dict, template: dict | None, name: str, t0: float) -> dict
     # 4. TTS
     text, passed = pick_tts(template or {}, row['answer'], name)
     row['passed'] = None if passed is None else int(passed)
+    stages = row.get('stages') if isinstance(row.get('stages'), dict) else {}
     if text:
         row['tts_text'] = text
+        t_tts = time.time()
         try:
             r = ctx.tts.speak(text, {'run_id': row['run_id'], 'waypoint': name, 'answer': row['answer']})
+            stages['tts_ms'] = int((time.time() - t_tts) * 1000)
+            stages['tts_cache_hit'] = r.get('cache_hit')
             row['tts_audio_path'] = r.get('audio_path')
             row['tts_status'] = dumps(r.get('sinks')) if not r.get('error') else f"{r.get('error')} {dumps(r.get('sinks'))}"
-            ctx.log_event('tts', f'{name}：播报「{text}」', run_id=row['run_id'], leg_id=row['leg_id'],
-                          data={'sinks': r.get('sinks'), 'audio_url': r.get('audio_url')})
+            timing = _fmt_stages(stages)
+            ctx.log_event('tts', f'{name}：播报「{text}」' + (f'（{timing}）' if timing else ''), run_id=row['run_id'], leg_id=row['leg_id'],
+                          data={'sinks': r.get('sinks'), 'audio_url': r.get('audio_url'), 'stages': stages})
         except Exception as e:      # noqa: BLE001
             row['tts_status'] = f'error: {e}'
             ctx.log_event('tts_failed', f'{name}：TTS 失败 {e}', level='error', run_id=row['run_id'], leg_id=row['leg_id'])

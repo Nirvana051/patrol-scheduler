@@ -13,7 +13,7 @@ import time
 import traceback
 
 from app.db import dumps, loads, now_iso
-from app.executor.inspection import run_inspection
+from app.executor.inspection import collect_tts_texts, run_inspection
 from app.robot.client import RobotError
 
 DEFAULT_OPTIONS = {'start_node': None,          # 任务的起始导航航点；None = 按机器人当前位置取最近的
@@ -256,6 +256,16 @@ class MissionRunner(threading.Thread):
                               'to_node': self.cur_node, 'status': 'pending', 'attempt': 0, 'tw': None, 'path': []})
         self._log('planned', f'规划完成：{len(self.legs)} 段，起点航点 {self.cur_node}',
                   data={'legs': [{'seq': l['seq'], 'to': l['to_node'], 'name': l['waypoint_name']} for l in self.legs]})
+        # 提前把到点后要用的东西备好：播报句子先合成进缓存（到点零合成）、读流器先连上（到点抓帧 ≤0.5 s）
+        tws = [l['tw'] for l in self.legs if l.get('tw')]
+        if tws:
+            try:
+                n = self.ctx.tts.prewarm(collect_tts_texts(tws))
+                if n:
+                    self._log('tts_prewarm', f'预合成 {n} 句播报（后台进行）', data={'count': n})
+            except Exception as e:      # noqa: BLE001
+                self._log('tts_prewarm', f'预合成播报失败（不影响执行）：{e}', level='warn')
+            self.ctx.snapshot.warm()
 
     # ── 段执行 ───────────────────────────────────────────────────────────────
     def _execute_leg(self, leg: dict) -> None:
@@ -301,6 +311,8 @@ class MissionRunner(threading.Thread):
                         raise LegFailed(f"第 {leg['seq']} 段下发失败：{e}")
                 self.dispatched_any = True
                 self._set_leg(leg, status='dispatched', dispatched_at=now_iso())
+                if leg.get('tw'):
+                    self.ctx.snapshot.warm()          # 机器人在路上的这几十秒里把流连上，到点直接取最新帧
                 self._log('leg_dispatched', f"第 {leg['seq']} 段：{self.cur_node} → {target}，路径 {' → '.join(path)}（{self.graph.path_length(path):.1f} m）",
                           leg_id=leg['id'], data={'path': path, 'idempotency_key': key, 'cursor': cursor, 'attempt': attempt})
                 try:

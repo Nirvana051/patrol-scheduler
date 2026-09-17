@@ -13,12 +13,18 @@
 * 未知 task_id → 400「任务 ID 不存在」（不是 404）
 * /position 未定位 → 503「机器人位置信息未就绪」
 * 控制权：auto 密钥写操作自动接管；被人抢占 → 409 + holder
+* 语音播报 /tts、/tts/audio、GET/DELETE /tts：文字 ≤300 字、音频 ≤5 MB 按文件头识别格式、队列满 20 → 429（不带 Retry-After）、
+  wait 最多 50 s → pending、volume 记住；旧固件（tts_firmware_old）整组端点回一页 HTML 的 404
 """
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
+import binascii
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -59,6 +65,34 @@ class TokenBucket:
                 self.tokens -= 1.0
                 return True
             return False
+
+
+AUDIO_MAX_BYTES = 5 * 1024 * 1024
+AUDIO_FORMATS = {'mp3', 'wav', 'ogg', 'opus', 'flac', 'm4a', 'aac'}
+AUDIO_CT = {'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+            'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/mp4': 'm4a', 'audio/aac': 'aac'}
+# 机器人端在 2026-09-14 之前的固件没有 /tts：Flask 默认的 404 页
+HTML_404 = ('<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n'
+            '<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n')
+
+
+def sniff_audio(data: bytes) -> str | None:
+    """按文件头识别音频格式（与机器人端一致：比调用方声明的 format 优先）。"""
+    if data.startswith(b'ID3') or (len(data) > 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return 'mp3'
+    if data.startswith(b'RIFF') and data[8:12] == b'WAVE':
+        return 'wav'
+    if data.startswith(b'OggS'):
+        return 'ogg'
+    if data.startswith(b'fLaC'):
+        return 'flac'
+    if data[4:8] == b'ftyp':
+        return 'm4a'
+    return None
+
+
+def truthy(v) -> bool:
+    return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str = VIEWER_KEY,
@@ -334,6 +368,131 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
         return StreamingResponse(gen(), media_type='text/event-stream',
                                  headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
+    # ── 语音播报（机器人端固件 ≥ 2026-09-14）───────────────────────────────
+    def tts_guard(name: str, request: Request, info: dict, *, write: bool = True):
+        """公共前置：机器人存在 → 控制权（写操作）→ 在线 → 旧固件一页 HTML 的 404。返回 Response 即出错。"""
+        if not resolve_robot(name):
+            return fail(404, '机器人不存在')
+        if write:
+            g = write_guard(request, info)
+            if g:
+                return g
+        if not robot.online:
+            return fail(502, '机器人不在线')
+        if robot.tts_firmware_old:
+            return HTMLResponse(HTML_404, status_code=404)
+        return None
+
+    def parse_volume(v):
+        if v is None or v == '':
+            return None, None
+        try:
+            iv = int(float(v))
+        except (TypeError, ValueError):
+            return None, fail(400, 'volume must be 0-100')
+        if not 0 <= iv <= 100:
+            return None, fail(400, 'volume must be 0-100')
+        return iv, None
+
+    def finish(st: int, data: dict) -> JSONResponse:
+        return fail(st, data['error']) if st >= 400 else ok(data, status=st)
+
+    @app.post('/v1/robots/{name}/tts')
+    async def tts_post(name: str, request: Request):
+        info, err = auth(request)
+        if err:
+            return err
+        body = await body_json(request)
+
+        def do() -> JSONResponse:
+            g = tts_guard(name, request, info)
+            if g:
+                return g
+            # 机器人端：去掉控制字符、连续空白折成一个空格
+            text = re.sub(r'\s+', ' ', ''.join(ch for ch in str(body.get('text') or '') if ch >= ' ' or ch in '\t\n')).strip()
+            if not text:
+                return fail(400, 'text is empty')
+            if len(text) > 300:
+                return fail(400, 'text too long (>300)')
+            lang = body.get('lang')
+            if lang not in (None, '', 'zh', 'en'):
+                return fail(400, 'lang must be zh or en')
+            vol, e = parse_volume(body.get('volume'))
+            if e:
+                return e
+            if not robot.tts_available:
+                return fail(503, 'tts engine or audio player unavailable')
+            st, data = robot.tts_enqueue('text', text=text, lang=lang or None, volume=vol,
+                                         interrupt=truthy(body.get('interrupt', False)), wait=truthy(body.get('wait', False)))
+            return finish(st, data)
+        return await asyncio.to_thread(idempotent, request, info, do)      # wait=true 会阻塞到 50 s，别占事件循环
+
+    @app.post('/v1/robots/{name}/tts/audio')
+    async def tts_audio(name: str, request: Request):
+        info, err = auth(request)
+        if err:
+            return err
+        ct = (request.headers.get('content-type') or '').split(';')[0].strip().lower()
+        q = request.query_params
+        opts = {k: q.get(k) for k in ('wait', 'volume', 'interrupt', 'format')}
+        cl = request.headers.get('content-length')
+        if cl and cl.isdigit() and int(cl) > AUDIO_MAX_BYTES:
+            return fail(413, 'audio too large (>5MB)')                    # Content-Length 阶段就拒，不等传完
+        if ct == 'application/json':                                       # ③ JSON + base64（SDK 用这种）
+            body = await body_json(request)
+            try:
+                data = base64.b64decode(str(body.get('audio_b64') or ''), validate=True)
+            except (ValueError, binascii.Error):
+                return fail(400, 'audio_b64 不是合法 base64')
+            opts.update({k: body.get(k) for k in opts if k in body})
+        elif ct.startswith('multipart/form-data'):                         # ② multipart，字段名 file
+            form = await request.form()
+            up = form.get('file')
+            if up is None or not hasattr(up, 'read'):
+                return fail(400, 'multipart 缺少 file 字段')
+            data = await up.read()
+            opts.update({k: form.get(k) for k in opts if k in form})
+        else:                                                              # ① 文件字节直接当请求体
+            data = await request.body()
+            if not opts['format']:
+                opts['format'] = AUDIO_CT.get(ct)
+        if len(data) > AUDIO_MAX_BYTES:
+            return fail(413, 'audio too large (>5MB)')
+        declared = str(opts['format'] or '').lower().lstrip('.')
+        fmt = sniff_audio(data) or (declared if declared in AUDIO_FORMATS else None)   # 文件头优先于声明；声明也得是认识的格式
+
+        def do() -> JSONResponse:
+            g = tts_guard(name, request, info)
+            if g:
+                return g
+            if not data or not fmt:
+                return fail(400, 'unrecognized audio format; pass format=…')
+            vol, e = parse_volume(opts['volume'])
+            if e:
+                return e
+            if not robot.tts_available:
+                return fail(503, 'tts engine or audio player unavailable')
+            if fmt != 'wav' and not robot.tts_ffmpeg:
+                return fail(503, 'ffmpeg missing on robot; only wav can be played')
+            st, d = robot.tts_enqueue('audio', audio=data, fmt=fmt, volume=vol,
+                                      interrupt=truthy(opts['interrupt'] or False), wait=truthy(opts['wait'] or False))
+            return finish(st, d)
+        return await asyncio.to_thread(idempotent, request, info, do)
+
+    @app.get('/v1/robots/{name}/tts')
+    def tts_get(name: str, request: Request):
+        info, err = auth(request)
+        if err:
+            return err
+        return tts_guard(name, request, info, write=False) or ok(robot.tts_status())   # viewer 即可
+
+    @app.delete('/v1/robots/{name}/tts')
+    def tts_delete(name: str, request: Request):
+        info, err = auth(request)
+        if err:
+            return err
+        return idempotent(request, info, lambda: tts_guard(name, request, info) or ok(robot.tts_stop()))
+
     def _control(name: str, action: str, request: Request):
         info, err = auth(request)
         if err:
@@ -423,6 +582,17 @@ def create_app(robot: MockRobot, *, api_key: str = DEFAULT_KEY, viewer_key: str 
             with robot.lock:
                 robot.ignore_stop = bool(b.get('on', True))
             return {'ok': True, 'ignore_stop': robot.ignore_stop}
+        if b.get('kind') in ('tts_firmware_old', 'tts_unavailable', 'tts_no_ffmpeg'):
+            with robot.lock:
+                on = bool(b.get('on', True))
+                if b['kind'] == 'tts_firmware_old':
+                    robot.tts_firmware_old = on
+                elif b['kind'] == 'tts_unavailable':
+                    robot.tts_available = not on
+                else:
+                    robot.tts_ffmpeg = not on
+            return {'ok': True, 'tts_firmware_old': robot.tts_firmware_old, 'tts_available': robot.tts_available,
+                    'tts_ffmpeg': robot.tts_ffmpeg}
         if b.get('kind') == 'html502':
             with robot.lock:
                 robot.html502_left = int(b.get('count') or 1)

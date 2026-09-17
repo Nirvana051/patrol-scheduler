@@ -198,6 +198,60 @@ class RobotClient:
             'POST', '/estop', {'active': True},
             idempotency_key=idempotency_key or f'estop-{uuid.uuid4().hex[:16]}'))
 
+    def tts(self, text: str, *, lang: str | None = None, volume: int | None = None,
+            wait: bool = False, interrupt: bool = False,
+            idempotency_key: str | None = None) -> dict:
+        """语音播报：机器人离线合成 `text`（≤300 字）后由扬声器念出。需要控制权。
+
+        默认异步——入队即返回 `{id, queued}`；`wait=True` 等到播完再返回（最长约 50 秒，
+        超时返回 `pending=True` 但播报仍会继续）。`interrupt=True` 先打断正在播的再播这条。
+        `lang` 不传按文字自动判断（含汉字→zh），`volume` 0-100 调整扬声器音量。
+        """
+        payload: dict = {'text': text, 'wait': bool(wait), 'interrupt': bool(interrupt)}
+        if lang is not None:
+            payload['lang'] = lang
+        if volume is not None:
+            payload['volume'] = int(volume)
+        return self._data(self._request(
+            'POST', '/tts', payload,
+            idempotency_key=idempotency_key or f'tts-{uuid.uuid4().hex[:16]}'))
+
+    def tts_audio(self, audio, *, format: str | None = None, volume: int | None = None,
+                  wait: bool = False, interrupt: bool = False,
+                  idempotency_key: str | None = None) -> dict:
+        """播放一段音频（mp3/wav/ogg/flac/m4a/aac，≤5MB）：`audio` 是 bytes 或文件路径。
+
+        给云端合成好的语音（如豆包 TTS 返回的 mp3）或预录提示音用；与 tts() 共用播放队列。
+        走 JSON+base64（体积会胀 1/3），大文件也可自行用 multipart 直接 POST /tts/audio。
+        """
+        import base64 as _b64
+        import pathlib as _pl
+        if isinstance(audio, (str, _pl.PurePath)):
+            p = _pl.Path(audio)
+            data = p.read_bytes()
+            format = format or (p.suffix.lstrip('.').lower() or None)
+        else:
+            data = bytes(audio)
+        payload: dict = {'audio_b64': _b64.b64encode(data).decode('ascii'),
+                         'wait': bool(wait), 'interrupt': bool(interrupt)}
+        if format:
+            payload['format'] = format
+        if volume is not None:
+            payload['volume'] = int(volume)
+        return self._data(self._request(
+            'POST', '/tts/audio', payload,
+            idempotency_key=idempotency_key or f'tts-audio-{uuid.uuid4().hex[:16]}'))
+
+    def tts_status(self) -> dict:
+        """播报引擎/设备/队列状态；`available=False` 说明机器人上没有可用的合成引擎或扬声器。"""
+        return self._data(self._request('GET', '/tts'))
+
+    def tts_stop(self, *, idempotency_key: str | None = None) -> dict:
+        """打断当前播报并清空队列，返回丢弃条数 `{dropped}`。"""
+        return self._data(self._request(
+            'DELETE', '/tts', None,
+            idempotency_key=idempotency_key or f'tts-stop-{uuid.uuid4().hex[:16]}'))
+
     def clear_estop(self, *, idempotency_key: str | None = None) -> dict:
         """取消急停。取消之前机器人会一直被推向停止。"""
         return self._data(self._request(

@@ -300,3 +300,18 @@
 - 修：加 `.gitattributes`（`* text=auto eol=lf` + 逐类型 `eol=lf` + 图片/音频/字体标 binary），从源头堵住；再用同样的 autocrlf clone 复测，已是 LF。老 clone 出来的目录给一条 `sed -i 's/\r$//'` 一次修完。
 - 顺手把新机器的第二、第三道坎也铲了：`requirements.txt` 原先把 **Pillow / requests / numpy** 当作"系统 site-packages 里已经有"（注释里写着），但 `app/media/pano.py`、`app/vlm/openai_compat.py`、`app/media/pointcloud.py` 都是开机即 import，新机器上装完依赖照样起不来 —— 现已列全（cv2 其实从未用到，删掉）。`start.sh`/`run.sh`/`Makefile` 认 `PS_PYTHON`，已有 conda 环境的人不用再建 `.venv`。
 - 另外提醒了两句常识坑：`sh start.sh` 永远不行（Ubuntu 的 `sh` 是 dash，不认 `set -o pipefail`）；`run.sh` 是旧的前台脚本，现在只用 `start.sh`。
+
+## 09-14 上游新增语音播报接口 → 汇出 `robot`（v0.6.0）
+- `git pull` 拿到 5fe1e59：机器人端固件 2026-09-14 起有 `POST /tts`（本地 piper 离线合成）、`POST /tts/audio`（播调用方的 mp3/wav）、`GET/DELETE /tts`。T2「云端没有扬声器端点」的前提不在了。
+- 设计取舍：① 汇出层加 `robot`，而不是替换引擎 —— 引擎（要不要合成、用谁的音色）与汇出（声音从哪出来）仍然正交：`none + robot` = 机器人自己念（零外网依赖）；`edge + robot` = 我们的音色推过去；② 默认 `TTS_ROBOT_WAIT=0`，播报入队即返回，机器人边走边播，不给每个点多加 3–5 s；③ 音频推不成时退回文字（400/413/503 三种才退，409/429 不退 —— 那不是音频的问题）；④ 旧固件的 HTML 404 明确报「固件太旧」并指向 `audio_server` 兜底，`audio_server` 与 `http` 汇出保留。
+- 顺手抓到的自家 bug：sink 把 `.bin` 后缀原样当 `format` 声明发过去，mock 也照单全收 —— 两边都改成只认 mp3/wav/ogg/opus/flac/m4a/aac。
+- mock：新端点 + `tts_firmware_old` / `tts_unavailable` / `tts_no_ffmpeg` 三个故障开关；`wait=1` 会阻塞到 50 s，用 `asyncio.to_thread` 包起来别占事件循环。
+- 用例 138 → 148；`make lint`、`make docs-check` 全绿。
+
+## 09-15 「整个流程偏慢」：先量化再动手（v0.7.0）
+- 用户怀疑 mp3 太大。拉 run 247 的事件时间线：到点后 3.0 s 才开始抓（任务 `settle_seconds=3`）、抓帧 0.5–2.3 s 抖、判读 1.7–2.4 s、合成+推送+**等播完** 3.4–4.1 s（`TTS_ROBOT_WAIT=1`）、下发 0.7 s。mp3 一句 20 KB，传输不到 0.1 s —— 不是它。
+- 抓帧抖动的根因：一次性起 ffmpeg 要等下一个关键帧，用户的 FLV 直播流 GOP ≈ 3 s；本机单独实测一次性抓 1.0–3.4 s，低延迟参数无效；常驻解码连上后每 0.5 s 一帧。→ `LiveStreamSource`：下发下一段时 `warm()`，到点取最新帧；冷启动 / 卡流一律退回一次性抓帧，体检语义原样保留（解码错误后 1 s 内的帧视为可疑）。
+- 播报句子是答案模版里写死的三句，没道理每次到点现合成 → 规划完成时 `prewarm()` 全部合成进 `media/tts_cache/`（键 = 引擎|声音|文本），到点零合成；机器人端同字节命中它自己的哈希缓存。
+- 每条 `tts` 事件带分阶段耗时，下次不用再翻时间戳算。
+- 代码不替用户改设置（09-14 的教训）：文档里写清 `TTS_ROBOT_WAIT=0`、`settle_seconds` 调到 1–2。
+- 用例 148 → 153。

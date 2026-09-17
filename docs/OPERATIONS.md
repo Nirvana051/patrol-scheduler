@@ -8,7 +8,7 @@
 
 - 管理员在云端「API 接入」里签发密钥：角色 **operator**，租约模式 **auto**（C2）。别名如 `ntu-dog-00001`（不要用机器人 ID 当地址，C13）。
 - 本机能访问 `https://certaintyx.sg:8443`（4G 隧道由机器人主动拨出，不需要同一网络）。
-- 本机有 ffmpeg（抓帧）；如需 TTS 合成需联网（edge-tts），或改 `TTS_ENGINE=none` 让浏览器念。
+- 本机有 ffmpeg（抓帧）；播报走机器人自带扬声器（`TTS_SINKS=robot`，机器人固件 ≥ 2026-09-14）：`TTS_ENGINE=none` 由机器人离线合成、不需要联网；用 edge 音色才需要本机联网。
 
 ## 1. 配置
 
@@ -21,7 +21,7 @@ CX_KEY=cx_xxxxxxxx_...
 SNAPSHOT_SOURCE=rtsp          # 真机全景抓帧（TCP）
 VLM_PROVIDER=openai_compat    # 或 anthropic / mock
 VLM_BASE_URL=...  VLM_MODEL=...  VLM_API_KEY=...
-TTS_ENGINE=edge  TTS_SINKS=browser,local
+TTS_ENGINE=none  TTS_SINKS=robot,browser   # 机器人自带扬声器 + 网页；edge 音色改 TTS_ENGINE=edge
 ```
 密钥只在服务端；网页里永远是掩码（C13）。改完 `./run.sh`，顶栏应显示 **REAL**。
 
@@ -94,7 +94,9 @@ python3 ../Sample_web_api/examples/python/04_verify_flow.py --robot ntu-dog-0000
 ## 5b. 定时、通知与复核
 
 - **定时计划**：「任务规划 → ⏰ 定时」，每天固定时刻（如 `07:30,19:30`）或每 N 分钟。到点时若已有执行在跑会跳过并记事件；执行前照常做前置检查（未初始化就会 aborted，事件里能看到原因）。
-- **机器狗端播报（不依赖任何外部服务）**：本项目自带 `audio_server/`（纯标准库）。把 `audio_server` 目录拷到有喇叭的机器上（机器狗的 Jetson 或现场 PC），`python3 -m audio_server --host 0.0.0.0 --port 5566 --token 口令`（需要 ffplay/aplay 之一；systemd 单元见 `deploy/patrol-audio.service`）。调度系统设置 `TTS_SINKS=browser,http`、`TTS_AUDIO_SERVER_URL=http://<那台机器>:5566`、口令一致即可：调度系统用 edge-tts 合成好 mp3 直接推过去，机器人端不需要联网、不需要 TTS 引擎。`GET /health` 看队列与最近播放。
+- **机器狗端播报**：首选 `TTS_SINKS=robot` —— 云端 `POST …/tts` 直达机器人扬声器（2026-09-14 起；`GET /api/robot/tts` 看 `available`/声卡/音量，`DELETE` 打断）。报「固件太旧」的机器人用下面这条兜底。
+- **机器狗端播报兜底（不依赖任何外部服务）**：本项目自带 `audio_server/`（纯标准库）。把 `audio_server` 目录拷到有喇叭的机器上（机器狗的 Jetson 或现场 PC），`python3 -m audio_server --host 0.0.0.0 --port 5566 --token 口令`（需要 ffplay/aplay 之一；systemd 单元见 `deploy/patrol-audio.service`）。调度系统设置 `TTS_SINKS=browser,http`、`TTS_AUDIO_SERVER_URL=http://<那台机器>:5566`、口令一致即可：调度系统用 edge-tts 合成好 mp3 直接推过去，机器人端不需要联网、不需要 TTS 引擎。`GET /health` 看队列与最近播放。
+- **到点流程提速**：`SNAPSHOT_KEEPALIVE=1`（默认）让读流器在下发下一段时就连上，到点抓帧 ≤ 0.5 s；播报句子在任务开始时预合成；`TTS_ROBOT_WAIT=0`；任务选项 `settle_seconds` 1–2。每条 `tts` 事件带分阶段耗时，慢在哪直接看。
 - **失败通知**：设置 `NOTIFY_WEBHOOK_URL`，检查不通过 / 执行失败或中止时 POST JSON（`kind`、`run_id`、航点、prompt、回答、播报文本），接 IM 机器人即可。
 - **人工复核**：执行监控里每条检查可「判通过 / 判不通过 / 撤销」。统计按复核后的结果算；VLM 原结论保留，日后做评测集。
 - **丢定位**：默认策略是停下云端任务、段回到待执行、执行暂停并提示；在「总览」用机器人**当前最近**的航点重新定位，再回执行监控点「继续」，系统从当前位置重新规划该段。

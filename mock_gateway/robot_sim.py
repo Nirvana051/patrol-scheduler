@@ -8,6 +8,8 @@
 * /perception 的 Location 恒为 1（机器人端的已知 bug），location_valid 恒为 false
 * 事件 500 条环形缓冲，seq 单调递增，since 游标续接
 * 定位：先发 relocalization → 等收敛 → 偏差 >3m 判 drift_exceeded；设备没起来判 timeout
+* 语音播报（2026-09-14 固件起）：文字/音频共用一条串行队列，满 20 条 429；wait 最多等 50 s 后 pending；
+  volume 会被记住；旧固件对整组端点回一页 HTML 的 404
 """
 from __future__ import annotations
 
@@ -81,6 +83,19 @@ class MockRobot:
         self.drop_events = False
         self.lease: dict | None = None
         self.device_tasks: dict[str, dict] = {}
+        # 语音播报（2026-09-14 起的机器人端固件才有）
+        self.tts_firmware_old = False        # True → 四个 /tts 端点都回一页 HTML 的 404（旧固件）
+        self.tts_available = True            # False → 503 tts engine or audio player unavailable
+        self.tts_ffmpeg = True               # False → 只能播 wav，其它格式 503
+        self.tts_seconds_per_char = 0.12     # 仿真播放时长：文字按字数；音频按体积折算（测试里可调小）
+        self.tts_queue: collections.deque = collections.deque()
+        self.tts_speaking: dict | None = None
+        self.tts_speaking_until = 0.0
+        self.tts_played = 0
+        self.tts_failed = 0
+        self.tts_last: dict | None = None
+        self.tts_volume: int | None = None   # 机器人记住的音量；None = 从未设置过
+        self.tts_log: list[dict] = []        # 每次成功入队的请求原文（测试用断言）
         self.current_map = next(iter(self.maps))
 
         wps = self.maps[self.current_map]
@@ -429,6 +444,15 @@ class MockRobot:
             self.linear = 0.0
             self._was_avoiding = False          # 否则复位后第一拍会补发一条「避障结束」
             self._loc_lost = False
+            self.tts_firmware_old = False
+            self.tts_available = True
+            self.tts_ffmpeg = True
+            self.tts_queue.clear()
+            self.tts_speaking = None
+            self.tts_played = self.tts_failed = 0
+            self.tts_last = None
+            self.tts_volume = None
+            self.tts_log.clear()
 
     def snapshot_state(self) -> dict:
         with self.lock:
@@ -438,7 +462,92 @@ class MockRobot:
                     'freeze_telemetry_at': self.freeze_telemetry_at, 'robot_version': self.robot_version,
                     'current_map': self.current_map, 'task': self.task_view(), 'seq': self.seq,
                     'lease': self.lease, 'fault_next_leg': self.fault_next_leg,
-                    'drop_events': self.drop_events, 'speed': self.speed}
+                    'drop_events': self.drop_events, 'speed': self.speed,
+                    'tts': {'queue': len(self.tts_queue), 'speaking': self.tts_speaking and self.tts_speaking['text'],
+                            'played': self.tts_played, 'volume': self.tts_volume, 'log': len(self.tts_log),
+                            'firmware_old': self.tts_firmware_old}}
+
+    # ── 语音播报 ────────────────────────────────────────────────────────────
+    TTS_QUEUE_MAX = 20
+    TTS_WAIT_MAX = 50.0
+
+    def tts_enqueue(self, kind: str, *, text: str = '', audio: bytes = b'', fmt: str = '', lang: str | None = None,
+                    volume: int | None = None, interrupt: bool = False, wait: bool = False) -> tuple[int, dict]:
+        """入队一条播报，返回 (HTTP 状态码, data)。kind = text（机器人本地合成）| audio（调用方给的音频）。
+
+        真机语义：串行播放；`queued` 是前面还有几条；`wait` 最多等 50 s，再长返回 pending=True 但照样播；
+        `interrupt` 先清空；`volume` 记住（重启后仍沿用）。
+        """
+        with self.lock:
+            if interrupt:
+                self._tts_drop_all()
+            if len(self.tts_queue) >= self.TTS_QUEUE_MAX:
+                return 429, {'error': 'tts queue full'}
+            if volume is not None:
+                self.tts_volume = max(0, min(100, int(volume)))
+            item_id = uuid.uuid4().hex[:12]
+            if kind == 'audio':
+                engine, label = f'audio:{fmt}', f'[audio {fmt} {max(1, len(audio) // 1024)}KB]'
+                seconds = max(0.3, len(audio) / 8000.0 * (self.tts_seconds_per_char / 0.12))   # 64 kbps 语音 ≈ 8 KB/s
+            else:
+                is_zh = lang == 'zh' or (lang is None and any('\u4e00' <= ch <= '\u9fff' for ch in text))
+                engine, label = ('piper:zh_CN-huayan-medium' if is_zh else 'espeak:en'), text
+                seconds = max(0.3, len(text) * self.tts_seconds_per_char)
+            item = {'id': item_id, 'text': label, 'engine': engine, 'seconds': round(seconds, 2), 'done': None}
+            queued = len(self.tts_queue) + (1 if self.tts_speaking else 0)
+            self.tts_queue.append(item)
+            self.tts_log.append({'id': item_id, 'kind': kind, 'text': text, 'format': fmt, 'bytes': len(audio), 'lang': lang,
+                                 'volume': volume, 'interrupt': interrupt, 'wait': wait, 'ts': time.time()})
+            self._tts_advance(time.time())
+            if not wait:
+                return 202, {'ok': True, 'id': item_id, 'queued': queued, 'engine': engine}
+            deadline = time.time() + self.TTS_WAIT_MAX
+            while item['done'] is None and time.time() < deadline:
+                self.cond.wait(min(0.5, max(0.01, deadline - time.time())))
+            if item['done'] is None:
+                return 200, {'ok': True, 'id': item_id, 'queued': 0, 'engine': engine, 'pending': True}
+            return 200, {'ok': item['done'], 'id': item_id, 'queued': 0, 'engine': engine, 'seconds': item['seconds']}
+
+    def _tts_advance(self, now: float) -> None:
+        if self.tts_speaking and now >= self.tts_speaking_until:
+            item = self.tts_speaking
+            item['done'] = True
+            self.tts_played += 1
+            self.tts_last = {'id': item['id'], 'text': item['text'], 'ok': True, 'engine': item['engine'],
+                             'seconds': item['seconds'], 'at': round(now, 3)}
+            self.tts_speaking = None
+            self.cond.notify_all()
+        if self.tts_speaking is None and self.tts_queue:
+            self.tts_speaking = self.tts_queue.popleft()
+            self.tts_speaking_until = now + self.tts_speaking['seconds']
+
+    def _tts_drop_all(self) -> int:
+        n = 0
+        if self.tts_speaking:
+            self.tts_speaking['done'] = False
+            self.tts_speaking = None
+            n += 1
+        for item in self.tts_queue:
+            item['done'] = False
+        n += len(self.tts_queue)
+        self.tts_queue.clear()
+        self.cond.notify_all()
+        return n
+
+    def tts_stop(self) -> dict:
+        with self.lock:
+            return {'dropped': self._tts_drop_all()}
+
+    def tts_status(self) -> dict:
+        with self.lock:
+            s = self.tts_speaking
+            return {'available': self.tts_available,
+                    'engines': {'piper': True, 'piper_voices': {'zh': '/opt/piper/voices/zh_CN-huayan-medium.onnx'},
+                                'espeak': True, 'ffmpeg': self.tts_ffmpeg, 'player': 'aplay'},
+                    'device': 'plughw:CARD=CD002AUDIO,DEV=0', 'queue': len(self.tts_queue),
+                    'speaking': {'id': s['id'], 'text': s['text']} if s else None,
+                    'played': self.tts_played, 'failed': self.tts_failed, 'last': self.tts_last,
+                    'volume': self.tts_volume, 'max_text_len': 300}
 
     # ── 运动学主循环 ─────────────────────────────────────────────────────────
     def _loop(self) -> None:
@@ -454,6 +563,7 @@ class MockRobot:
                     pass
 
     def _step(self, dt: float, now: float) -> None:
+        self._tts_advance(now)
         if self.localized and now >= self.loc_lost_until:
             self.loc_received_at = now
         avoiding_before = self.linear >= 0 and getattr(self, '_was_avoiding', False)

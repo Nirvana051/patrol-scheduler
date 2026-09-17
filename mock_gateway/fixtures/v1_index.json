@@ -51,6 +51,21 @@
                 "desc": "\u6025\u505c\uff08\u514d\u63a7\u5236\u6743\uff09"
             },
             {
+                "method": "POST",
+                "path": "/v1/robots/{robot}/tts",
+                "desc": "\u8bed\u97f3\u64ad\u62a5\uff1a\u673a\u5668\u4eba\u672c\u5730\u5408\u6210\u5e76\u5ff5\u51fa\u4e00\u6bb5\u6587\u5b57\uff08\u9700\u63a7\u5236\u6743\uff09"
+            },
+            {
+                "method": "POST",
+                "path": "/v1/robots/{robot}/tts/audio",
+                "desc": "\u64ad\u653e\u4f60\u53d1\u8fc7\u53bb\u7684 mp3 / wav\uff08\u9700\u63a7\u5236\u6743\uff09"
+            },
+            {
+                "method": "GET|DELETE",
+                "path": "/v1/robots/{robot}/tts",
+                "desc": "\u64ad\u62a5\u72b6\u6001 / \u6253\u65ad\u5e76\u6e05\u7a7a\u961f\u5217"
+            },
+            {
                 "method": "GET",
                 "path": "/v1/robots",
                 "desc": "\u673a\u5668\u4eba\u5217\u8868\uff08\u542b\u5728\u7ebf\u72b6\u6001\u4e0e API \u57fa\u5740\uff09"

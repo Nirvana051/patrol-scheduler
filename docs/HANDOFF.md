@@ -28,7 +28,7 @@ cd /home/leo/agent/scheduler
 ./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统，不需要任何凭据
 ./start.sh --audio    # 叠加：本机播报服务 127.0.0.1:5566
 ./start.sh --status | --stop | --restart
-make test             # 138 用例，约 4 分钟；make lint
+make test             # 153 用例，约 4 分钟；make lint
 make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 make vlm              # VLM 连通性探针（接新模型先跑这个）
 make seed             # 仿真下灌演示数据并跑一趟
@@ -44,8 +44,8 @@ make seed             # 仿真下灌演示数据并跑一趟
 | 状态灯、定位是否就绪 | `app/robot/status.py`（C9：只认 `received_at` 新鲜度） |
 | 云端事件监听、游标、落库 | `app/robot/events.py`（唯一性按 `(gateway, cloud_seq)`） |
 | 分段执行状态机 | `app/executor/runner.py`（起点/下发/到达/失败/重试/暂停/丢定位/外部任务/停任务核实） |
-| 抓图 → 裁切 → VLM → TTS | `app/executor/inspection.py`、`app/media/pano.py`、`app/media/snapshot.py` |
-| VLM / TTS 适配器 | `app/vlm/*`（`QwenVlm` = DashScope，非流式必须带 `enable_thinking:false`）、`app/tts/base.py`（合成用**守护线程**，见 §5.4）；扬声器端 `audio_server/` |
+| 抓图 → 裁切 → VLM → TTS | `app/executor/inspection.py`（每条 `tts` 事件带分阶段耗时）、`app/media/pano.py`、`app/media/snapshot.py`（`LiveStreamSource` 常驻读流：下发下一段时 `warm()`，到点取最新帧，冷启动退回一次性抓帧） |
+| VLM / TTS 适配器 | `app/vlm/*`（`QwenVlm` = DashScope，非流式必须带 `enable_thinking:false`）、`app/tts/base.py`（合成用**守护线程**，见 §5.4；汇出 `robot` = 云端 `/tts` 接口直达机器人扬声器，固件 ≥ 2026-09-14）；旧固件兜底的扬声器端 `audio_server/` |
 | REST / SSE | `app/api/*.py`，装配在 `app/context.py`，入口 `app/main.py`（含前端 `no-cache`） |
 | 定时计划 | `app/scheduler.py`（daily / interval，不引 cron 库） |
 | 前端 | `web/js/views/*.js`（原生 JS 无构建；`?nosse=1` 静态模式供无头截图；`#/tasks/<id>`、`#/waypoints/<id>` 深链） |

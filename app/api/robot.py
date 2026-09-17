@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""机器人：状态、初始化三步、急停、停任务、抓图、视频地址。"""
+"""机器人：状态、初始化三步、急停、停任务、抓图、视频地址、机身扬声器播报状态/打断。"""
 from __future__ import annotations
 
 import time
@@ -85,6 +85,18 @@ def estop(body: EstopIn, request: Request):
 @router.delete('/task')
 def stop_task(request: Request):
     return ctx_of(request).ops.stop_task()
+
+
+@router.get('/tts')
+def tts_status(request: Request):
+    """机器人扬声器：引擎 / 声卡 / 队列 / 记住的音量（viewer 即可；旧固件 → 400 带说明）。"""
+    return ctx_of(request).ops.tts_status()
+
+
+@router.delete('/tts')
+def tts_stop(request: Request):
+    """打断正在播的并清空机器人播报队列。"""
+    return ctx_of(request).ops.tts_stop()
 
 
 @router.post('/snapshot')

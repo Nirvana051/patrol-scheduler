@@ -52,7 +52,10 @@ sudo systemctl daemon-reload && sudo systemctl enable --now patrol-scheduler
 用 nginx / caddy 反向代理并加 Basic Auth / SSO。危险设置（如 `TTS_COMMAND` 可在设置页改成任意命令）
 在暴露前应从网页上移走（T12）。
 
-## 4. 播报服务（机器狗端）
+## 4. 播报服务（机器狗端，旧固件兜底）
+
+机器人固件 ≥ 2026-09-14 时**不需要这一节**：`TTS_SINKS=robot` 直接走云端 `/tts` 接口到机身扬声器。
+以下给固件还没升级的机器人用。
 
 `patrol-audio.service`：把 `audio_server/` 拷到有喇叭的机器上常驻。
 只需 python3 + 一个能出声的播放器（ffplay / mpg123 / aplay 之一），**不需要联网、不需要装 TTS**——

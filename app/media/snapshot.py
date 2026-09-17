@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -111,6 +113,12 @@ class SnapshotSource:
     def describe(self) -> str:
         return self.name
 
+    def warm(self) -> None:
+        """「马上要抓帧了」的预告（执行器在下发下一段时调）。默认什么都不做；常驻读流器用它提前连流。"""
+
+    def stop(self) -> None:
+        """释放后台资源（换抓图源 / 进程退出时调）。默认什么都不做。"""
+
 
 class RtspFfmpegSource(SnapshotSource):
     """从 RTSP 抓一帧。与 SDK snapshot() 同一条 ffmpeg 命令，只是输出到管道而不是文件。"""
@@ -163,6 +171,235 @@ class HlsFfmpegSource(SnapshotSource):
             return f'hls {self.url_provider()}'
         except Exception:      # noqa: BLE001
             return 'hls (地址未知)'
+
+
+class LiveStreamSource(SnapshotSource):
+    """常驻读流器：给 rtsp / hls / http 源套一层，让「到点抓帧」从 1–3.4 s 变成 ≤ 0.5 s 且不抖。
+
+    一次性起 ffmpeg 抓一帧必须等到**下一个关键帧**（真机直播流 GOP ≈ 3 s，2026-09-15 实测 1.0–3.4 s 抖动），
+    `-fflags nobuffer` 之类的低延迟参数救不了。这里改成 ffmpeg 常驻解码、每 1/fps 秒吐一帧 JPEG，
+    内存里只留最新一帧；执行器在**下发下一段时**调 warm()，机器人走到点时画面早就在手上了。
+
+    * grab()：有 ≤ max_age 秒的新鲜帧就直接用；否则等下一帧（最多 wait 秒）；
+      读流器没起来 / 等不到 → **退回一次性抓帧**（原逻辑，含体检），所以永远不会比以前更慢
+    * 体检照旧：纵向细节度不够 → 换下一帧（最多 attempts 次）；ffmpeg 刚在 stderr 报过解码错误的
+      1 s 内的帧视为可疑 → 直接等干净帧（不计入 attempts）
+    * 空闲 idle_seconds 没人 grab / warm 就自动停掉 ffmpeg，别一直占带宽；连续 stall_seconds 没新帧就重连
+    * 进程意外退出且仍需要时自动重连（退避 1 → 5 s）
+    """
+    name = 'live'
+    SUSPECT_AFTER_ERROR = 1.0
+
+    def __init__(self, inner: SnapshotSource, input_args_provider: Callable[[], list[str]], *, fps: float = 2.0,
+                 max_age: float = 1.5, wait: float = 4.0, idle_seconds: float = 120.0, stall_seconds: float = 15.0,
+                 attempts: int = DEFAULT_MAX_ATTEMPTS, min_detail: float = DEFAULT_MIN_DETAIL, qc: bool = True) -> None:
+        self.inner, self.input_args_provider = inner, input_args_provider
+        self.fps, self.max_age, self.wait = float(fps), float(max_age), float(wait)
+        self.idle_seconds, self.stall_seconds = float(idle_seconds), float(stall_seconds)
+        self.attempts, self.min_detail, self.qc = max(1, int(attempts)), float(min_detail), bool(qc)
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        self._wanted = False
+        self._frame: bytes | None = None
+        self._frame_ts = 0.0
+        self._frame_seq = 0
+        self._last_err_ts = 0.0
+        self._last_err = ''
+        self._last_use = 0.0
+        self._connected_at = 0.0
+        self.frames_total = 0
+        self.restarts = 0
+        self.grabs_live = 0
+        self.grabs_fallback = 0
+
+    # ── 生命周期 ────────────────────────────────────────────────────────────
+    def warm(self) -> None:
+        with self._lock:
+            self._last_use = time.time()
+            self._wanted = True
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._loop, name='live-stream', daemon=True)
+                self._thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._wanted = False
+            proc = self._proc
+        self._kill(proc)
+
+    def running(self) -> bool:
+        with self._lock:
+            return self._wanted and self._proc is not None and self._proc.poll() is None
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {'running': self._wanted and self._proc is not None and self._proc.poll() is None,
+                    'frame_age_s': round(time.time() - self._frame_ts, 2) if self._frame_ts else None,
+                    'frames': self.frames_total, 'restarts': self.restarts,
+                    'grabs_live': self.grabs_live, 'grabs_fallback': self.grabs_fallback, 'last_error': self._last_err[-120:]}
+
+    @staticmethod
+    def _kill(proc) -> None:
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:      # noqa: BLE001
+            pass
+
+    def _loop(self) -> None:
+        backoff = 1.0
+        while True:
+            with self._lock:
+                if not self._wanted:
+                    return
+            try:
+                cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', *self.input_args_provider(),
+                       '-vf', f'fps={self.fps:g}', '-f', 'image2pipe', '-c:v', 'mjpeg', '-q:v', '2', 'pipe:1']
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except Exception as e:      # noqa: BLE001 —— 没有 ffmpeg / 地址拿不到：等一会再试，grab 会走退回路径
+                with self._lock:
+                    self._last_err = f'启动 ffmpeg 失败: {e}'
+                time.sleep(backoff)
+                backoff = min(5.0, backoff * 2)
+                continue
+            with self._lock:
+                self._proc = proc
+                self._connected_at = time.time()
+            threading.Thread(target=self._pump_stderr, args=(proc,), name='live-stream-err', daemon=True).start()
+            threading.Thread(target=self._watchdog, args=(proc,), name='live-stream-dog', daemon=True).start()
+            got_any = self._pump_frames(proc)
+            self._kill(proc)
+            with self._lock:
+                self._proc = None
+                wanted = self._wanted
+            if not wanted:
+                return
+            self.restarts += 1
+            time.sleep(backoff if not got_any else 1.0)
+            backoff = 1.0 if got_any else min(5.0, backoff * 2)
+
+    def _pump_frames(self, proc) -> bool:
+        """从 stdout 里切出一张张 JPEG（SOI … EOI），只留最新一帧。返回是否收到过帧。"""
+        buf = b''
+        got_any = False
+        fd = proc.stdout.fileno()
+        while True:
+            try:
+                chunk = os.read(fd, 1 << 16)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                s = buf.find(b'\xff\xd8')
+                e = buf.find(b'\xff\xd9', s + 2) if s >= 0 else -1
+                if s < 0 or e < 0:
+                    if s > 0:
+                        buf = buf[s:]
+                    break
+                frame, buf = buf[s:e + 2], buf[e + 2:]
+                got_any = True
+                with self._cond:
+                    self._frame, self._frame_ts = frame, time.time()
+                    self._frame_seq += 1
+                    self.frames_total += 1
+                    self._cond.notify_all()
+        return got_any
+
+    def _pump_stderr(self, proc) -> None:
+        for raw in iter(proc.stderr.readline, b''):
+            line = raw.decode('utf-8', 'replace').strip()
+            if not line:
+                continue
+            with self._lock:
+                self._last_err = line
+                if DECODE_ERROR_PATTERNS.search(line):
+                    self._last_err_ts = time.time()
+
+    def _watchdog(self, proc) -> None:
+        """空闲太久 → 停；太久没新帧（流卡死）→ 杀掉让主循环重连。"""
+        period = max(0.5, min(5.0, self.idle_seconds / 2))
+        while proc.poll() is None:
+            time.sleep(period)
+            with self._lock:
+                idle = time.time() - self._last_use > self.idle_seconds
+                stalled = (time.time() - max(self._frame_ts, self._connected_at)) > self.stall_seconds
+                if idle:
+                    self._wanted = False
+            if idle or stalled:
+                self._kill(proc)
+                return
+
+    # ── 抓帧 ────────────────────────────────────────────────────────────────
+    def _next_frame(self, *, min_seq: int, min_ts: float, deadline: float):
+        with self._cond:
+            while True:
+                if self._frame is not None and self._frame_seq >= min_seq and self._frame_ts >= min_ts:
+                    return self._frame, self._frame_ts, self._frame_seq
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return None
+                self._cond.wait(min(remaining, 0.5))
+
+    def grab(self, context: dict | None = None) -> bytes:
+        t0 = time.time()
+        with self._lock:
+            self._last_use = t0
+            alive = self._wanted and self._proc is not None and self._proc.poll() is None
+        if not alive:
+            self.warm()                                    # 没预热：这次退回一次性抓帧，顺手把读流器起起来
+            return self._fallback(context, 'not_running', t0)
+        deadline = t0 + self.wait
+        info: dict = {'attempts': 0, 'ok': False, 'detail': None, 'reason': None, 'min_detail': self.min_detail}
+        min_seq, min_ts = 0, t0 - self.max_age
+        last = None
+        waited_clean = False
+        for i in range(self.attempts):
+            with self._lock:
+                err_ts = self._last_err_ts
+            clean_after = err_ts + self.SUSPECT_AFTER_ERROR
+            if self.qc and clean_after > min_ts:
+                min_ts, waited_clean = clean_after, True        # 刚报过解码错误：直接等干净帧，不计入 attempts
+            got = self._next_frame(min_seq=min_seq, min_ts=min_ts, deadline=deadline)
+            if got is None:
+                break
+            frame, ts, seq = got
+            last, min_seq = (frame, ts), seq + 1
+            info['attempts'] = i + 1
+            if not self.qc:
+                info.update(ok=True, reason=None)
+                break
+            detail = frame_detail(frame)
+            info['detail'] = detail
+            if self.min_detail > 0 and 0 <= detail < self.min_detail:
+                info['reason'] = f'画面没收敛（纵向细节 {detail:.2f} < {self.min_detail:.2f}）'
+                continue
+            info.update(ok=True, reason=None)
+            break
+        if last is None:
+            return self._fallback(context, 'no_fresh_frame', t0)
+        frame, ts = last
+        self.grabs_live += 1
+        if context is not None:
+            context['quality'] = info if self.qc else {}
+            context['grab'] = {'source': 'live', 'age_s': round(time.time() - ts, 2), 'ms': int((time.time() - t0) * 1000),
+                               'waited_for_clean': waited_clean}
+        return frame
+
+    def _fallback(self, context: dict | None, reason: str, t0: float) -> bytes:
+        self.grabs_fallback += 1
+        data = self.inner.grab(context)
+        if context is not None:
+            context['grab'] = {'source': 'oneshot', 'reason': reason, 'ms': int((time.time() - t0) * 1000)}
+        return data
+
+    def describe(self) -> str:
+        return f'{self.inner.describe()} +live({"读流中" if self.running() else "空闲"})'
 
 
 class LavfiSource(SnapshotSource):
@@ -238,25 +475,34 @@ def build_source(spec: str, *, rtsp_url_provider: Callable[[], str] | None = Non
                  pose_provider: Callable[[], dict | None] | None = None,
                  scene_provider: Callable[[], dict] | None = None,
                  attempts: int = DEFAULT_MAX_ATTEMPTS,
-                 min_detail: float = DEFAULT_MIN_DETAIL) -> SnapshotSource:
+                 min_detail: float = DEFAULT_MIN_DETAIL,
+                 keepalive: bool = False, keepalive_idle: float = 120.0) -> SnapshotSource:
     spec = (spec or 'synthetic').strip()
     qc = {'attempts': attempts, 'min_detail': min_detail}      # 只有 ffmpeg 抓真实流的源才体检
+
+    def live(inner: SnapshotSource, input_args: Callable[[], list[str]], *, do_qc: bool = True) -> SnapshotSource:
+        # 常驻读流只对 ffmpeg 读真实流的源有意义；synthetic / file 本来就是瞬时的
+        if not keepalive:
+            return inner
+        return LiveStreamSource(inner, input_args, idle_seconds=keepalive_idle, qc=do_qc, **qc)
+
     if spec == 'rtsp':
         if rtsp_url_provider is None:
             raise SnapshotError('rtsp 源需要 rtsp_url_provider')
-        return RtspFfmpegSource(rtsp_url_provider, **qc)
+        return live(RtspFfmpegSource(rtsp_url_provider, **qc), lambda: ['-rtsp_transport', 'tcp', '-i', rtsp_url_provider()])
     if spec == 'hls':
         if hls_url_provider is None:
             raise SnapshotError('hls 源需要 hls_url_provider')
-        return HlsFfmpegSource(hls_url_provider, **qc)
+        return live(HlsFfmpegSource(hls_url_provider, **qc), lambda: ['-fflags', 'nobuffer', '-i', hls_url_provider()])
     if spec.startswith('http://') or spec.startswith('https://'):
-        return HlsFfmpegSource(lambda: spec, **qc)
+        return live(HlsFfmpegSource(lambda: spec, **qc), lambda: ['-fflags', 'nobuffer', '-i', spec])
     if spec.startswith('rtsp://'):
-        return RtspFfmpegSource(lambda: spec, **qc)
+        return live(RtspFfmpegSource(lambda: spec, **qc), lambda: ['-rtsp_transport', 'tcp', '-i', spec])
     if spec.startswith('file:'):
         return FileSource(spec[5:])
     if spec.startswith('lavfi:'):
-        return LavfiSource(spec[6:] or 'testsrc=size=1280x640:rate=1')
+        filt = spec[6:] or 'testsrc=size=1280x640:rate=1'
+        return live(LavfiSource(filt), lambda: ['-f', 'lavfi', '-i', filt], do_qc=False)
     return SyntheticPanoSource(pose_provider, scene_provider)
 
 

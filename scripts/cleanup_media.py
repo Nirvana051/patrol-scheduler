@@ -53,7 +53,7 @@ def main() -> int:
                     shutil.rmtree(d, ignore_errors=True)
                 freed += size
                 removed += 1
-    for sub in ('tts', 'snapshots', 'tests'):
+    for sub in ('tts', 'tts_cache', 'snapshots', 'tests'):     # tts_cache 命中时会刷新 mtime，常用句子不会被清
         p = cfg.media_dir / sub
         if not p.exists():
             continue

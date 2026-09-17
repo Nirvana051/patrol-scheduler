@@ -17,7 +17,7 @@
 - **任务与执行**：**可指定起始点** + 有序任务航点 → 分段下发（起点 → 第一个任务航点 → 下一个…，`neighbors` 最短路）；到点 → 抓全景 → 裁切 → VLM → TTS；暂停/跳过/中止、失败后从剩余航点重跑、定时计划。
 - **看护**：前置检查（在线/急停/ROS/定位新鲜/云端空闲/控制权）、掉线/停滞/外部任务/控制权 409/丢定位（停下等重定位）判定与记录、进程退出先停机器人。
 - **可观测**：云端 + 系统事件时间线（云端事件挂到执行/段）、按航点统计与人工改判、失败通知 webhook、CSV 导出、系统自检、文件日志。
-- **适配器**：VLM（mock / 通义千问 DashScope / OpenAI 兼容 / Anthropic 官方 SDK）、TTS（edge-tts / 命令行 / 浏览器朗读）与汇出（浏览器 / 本机 / 自带 `audio_server` 播报服务 / webhook）、抓图源（RTSP / HLS / 合成 / 文件）。
+- **适配器**：VLM（mock / 通义千问 DashScope / OpenAI 兼容 / Anthropic 官方 SDK）、TTS（edge-tts / 命令行 / 不合成）与汇出（**机器人自带扬声器**——云端 `/tts` 接口，机器人本地合成或播我们的 mp3 / 浏览器 / 本机 / 自带 `audio_server` 播报服务（旧固件兜底）/ webhook）、抓图源（RTSP / HLS / 合成 / 文件）。
 - **mock 云端网关**：按 Sample_web_api 文档契约仿真，含运动学与故障注入，整套测试都对着它跑。
 
 ## 跑起来
@@ -56,7 +56,7 @@ make seed                                  # 灌演示数据并跑一遍
 ## 测试
 
 ```bash
-make test          # 全量 138 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
+make test          # 全量 153 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
 make lint          # ruff 静态检查（ruff.toml）
 make docs-check    # 文档体检：链接/命令/版本号/用例数/schema 版本与代码是否一致
 make shots         # 无头 Chrome 截图每个视图并收集 JS 错误（需调度系统在跑）
@@ -78,7 +78,7 @@ app/            FastAPI 后端（api/ 路由，robot/ 云端连接与线程，ex
 app/vendor/     certaintyx.py —— Sample_web_api 仓库 6167083 的 SDK 原样拷贝，不改
 web/            原生 HTML/CSS/JS 前端（无构建）
 mock_gateway/   按文档契约仿真的云端网关 + 机器狗运动学
-tests/          pytest（138 用例）
+tests/          pytest（153 用例）
 scripts/        演示数据、浸泡测试、真机冒烟、备份/清理、截图、文档体检
 docs/           管理文档副本、使用说明、上线手册、测试方案与报告、开发日志、TODO、路线图
 ```

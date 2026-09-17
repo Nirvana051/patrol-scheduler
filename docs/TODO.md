@@ -26,7 +26,7 @@
 | T33 | **Pillow 12 的严格化：其余绘图代码没逐个审计**。已修 `app/media/pano.py` 里合成图的门扇矩形（小图上宽度变负 → `x1 < x0`，Pillow 9 静默吞掉、Pillow 12 直接 `ValueError`，也就是说那个门框在小图上一直没画出来过） | 同类隐患（`x1<x0` / `y1<y0`）可能还在别的 `rectangle` / `ellipse` 调用里，只在特定尺寸下才炸 | 把 pano.py 里所有绘图坐标过一遍，或加一个「坐标必须已归一化」的小工具函数统一收口 |
 | T34 | **`requirements.lock` 的升级没有流程**：现在是手工 `pip freeze`。52 个精确版本里，FastAPI 栈钉在生产已验证的版本，`requests` / `Pillow` 是这次换成 venv 内的当前稳定版 | 升级依赖时不知道该跑哪些用例才算安全（这次靠全量 118 用例才发现 Pillow 的严格化） | 定一个清单：改 Pillow 必跑 `tests/test_pano.py`，改 numpy 必跑 `tests/test_pointcloud.py`（点云下采样有逐位比对），改 fastapi/pydantic 必跑 `tests/test_api.py`。写进 USAGE 或 TEST_PLAN |
 | T35 | **隔离 venv 更占磁盘**：`.venv` 199 MB（老的继承系统包只有 85 MB）—— 因为不再借用系统的 numpy/Pillow/scipy，自己各存一份 | 磁盘（这台机器 1.7T 空闲，不构成问题；小机器上要留意）| 记录事实，不处置。旧的 `.venv.old` 已删除 |
-| T2 | 云端 API 没有机器狗扬声器端点 | **已解决（14:20）**：本项目自带 `audio_server/`（纯标准库 HTTP 服务，部署到机器狗/现场 PC，只需 python3 + ffplay），调度系统合成好 mp3 直接推过去；不再依赖 `tts_cmq_dev`（zmq 汇出已移除）。剩余：真机上装一次、听一次 |
+| T2 | 云端 API 没有机器狗扬声器端点 | **已解决，两条路**：① **09-14 起云端有了** `POST …/tts`（机器人本地 piper 合成）/ `…/tts/audio`（播我们的 mp3），本系统汇出 `robot`（`TTS_SINKS=robot`，v0.6.0）直接走它，要求机器人固件 ≥ 2026-09-14；② 固件没升的机器用自带 `audio_server/`（`http` 汇出）兜底。剩余：真机上把 `robot` 汇出听一次（`GET /api/robot/tts` 先看 `available` 与声卡） |
 | T4 | 云端不暴露地图点云下载 | 手工上传 `.pcd/.ply` + 体素下采样接口已通；`PointCloudProvider.fetch_from_robot` 留桩 |
 | T10 | 真 VLM 的**准确率**未验证 | 通路已实测：`qwen3.5-flash`（DashScope 兼容模式）在真机上判读过 **26 次**（09-07 21:04 → 09-10，用户自己跑的），库里共 591 条检查 / 216 趟执行。**缺的是标注**：人工改判 0 条，所以 `make eval`（拿改判结果当标注算准确率）没有样本可用。下一步：在「执行监控」里对几十条检查做人工复核（判通过/判不通过），再跑 `make eval` 出总体与按航点的准确率。另外**空 prompt 的任务航点会稳定产出「无法判断」**——线上 591 条里的「无法判断」几乎都是这么来的，不是模型判不出来（给那些点填上 prompt，或从任务的检查列表里去掉）|
 | T11 | 单机器人 | `robots` 表 + 每机器人一组线程（roadmap） |

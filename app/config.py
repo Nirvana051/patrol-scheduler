@@ -34,10 +34,16 @@ DEFAULTS: dict[str, str] = {
     'ANTHROPIC_MODEL': 'claude-opus-5',
     'VLM_ANTHROPIC_FALLBACKS': '1',
     # TTS
-    'TTS_ENGINE': 'edge',             # edge | command | none
+    'TTS_ENGINE': 'edge',             # edge | command | none（none = 不合成：浏览器朗读 / 机器人本地合成）
     'TTS_VOICE': 'zh-CN-XiaoxiaoNeural',
     'TTS_COMMAND': '',                # command 引擎：如 espeak-ng -v cmn -w {out} "{text}"
-    'TTS_SINKS': 'browser',           # browser,local,http,webhook
+    'TTS_SINKS': 'browser',           # browser,robot,local,http,webhook
+    # robot 汇出 = 机器人自带扬声器，走云端 API 的 POST …/tts（文字，机器人本地 piper 合成）与
+    # POST …/tts/audio（把我们合成好的音频原样推过去）。要求机器人端固件 ≥ 2026-09-14。
+    'TTS_ROBOT_MODE': 'auto',         # auto = 有音频推音频、推不了退回文字 | text = 只发文字 | audio = 只推音频
+    'TTS_ROBOT_VOLUME': '',           # 0–100；留空 = 不改，沿用机器人记住的上次设置
+    'TTS_ROBOT_WAIT': '0',            # 1 = 播完再继续巡检（每点多等几秒）；0 = 入队即走，边走边播
+    'TTS_ROBOT_INTERRUPT': '0',       # 1 = 每条播报先打断前一条（告警型播报用）
     'TTS_AUDIO_SERVER_URL': '',       # 本项目 audio_server 的地址，如 http://192.168.0.122:5566
     'TTS_AUDIO_SERVER_TOKEN': '',
     'TTS_WEBHOOK_URL': '',
@@ -50,6 +56,10 @@ DEFAULTS: dict[str, str] = {
     'SNAPSHOT_MAX_ATTEMPTS': '3',     # 体检不合格时最多重抓几次（1 = 关掉重抓）
     'SNAPSHOT_MIN_DETAIL': '1.0',     # 画面纵向细节度下限；0 = 关掉这项体检
                                       # 实测真机全景正常 2.58–3.84、损坏 0.17、全糊 0.00
+    # 常驻读流：一次性抓帧要等下一个关键帧（真机直播流 GOP ≈ 3 s，实测 1.0–3.4 s 抖动）。
+    # 开着时执行器在下发下一段就把流连上、常驻解码，到点直接取最新帧（≤0.5 s）。只对 rtsp/hls/http 源生效。
+    'SNAPSHOT_KEEPALIVE': '1',
+    'SNAPSHOT_KEEPALIVE_IDLE': '120', # 这么多秒没人抓帧就断开，别一直占带宽
     'FORWARD_DEG': '180',
     'SETTLE_SECONDS': '2',
     'LEG_TIMEOUT': '600',
