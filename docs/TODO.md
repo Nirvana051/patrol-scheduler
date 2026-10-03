@@ -89,7 +89,7 @@ Electron 只做壳（拉起后端、窗口、托盘、优雅退出、仿真模�
 3. `--smoke` 只核对抓图接口返回的 URL 形状，没去取那张图 —— 上面 Windows 第 5 条的 404 它就看不出来。做法：smoke 里再 `GET` 一次那个 URL。
 4. 安装包带着开发依赖：`requirements.lock` 里钉着 pytest / ruff（连带 Pygments、pluggy、iniconfig），带不带 `--dev` 都会装进 runtime 并打进安装包，
    约 36 MB（ruff.exe 一个 25 MB）。做法：开发依赖从锁里拆出去（`--dev` 本来就会另装）。体积优先级最低，记着。
-5. **保存云端设置后左下角模式标识不刷新**：`web/js/app.js` 的 `renderMode()` 只在 SSE `hello` 时跑一次，存了 `CX_HOST` 后后端已是 real，
+5. **已修（2026-10-03 晚）保存云端设置后左下角模式标识不刷新**：现在 `setStatus()` 每收到一次状态快照就核对 `mode`，变了就重画（实测改 `CX_HOST` 后 1–3 s 自动变，两个方向都对）。原问题：`web/js/app.js` 的 `renderMode()` 只在 SSE `hello` 时跑一次，存了 `CX_HOST` 后后端已是 real，
    左下角仍显示 MOCK · 仿真；桌面壳去掉了菜单，没有 F5，用户只能重启程序（托盘「打开设置」只改 hash，不重新加载）。
    做法：`PUT /api/settings` 重连后往总线发一条 `mode` 事件让前端 `renderMode()`，或设置页保存成功后 `location.reload()`。
 

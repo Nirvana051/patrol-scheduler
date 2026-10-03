@@ -44,6 +44,8 @@
 - 修：没装 uv 时 `scripts/build_runtime.py` 第一步就退出 —— `pip install --target` 在 Windows 上也把 `uv.exe` 放进 `bin\`（不在 `Scripts\`），现在两处都找。
 - 文档：`WINDOWS_TEST.md` §2 的 `$py` 补上 `runtime\` 前缀；`pytest.ini` 已带 `-q`，文档与 CI 不再重复加（否则汇总行不打）；§7 加「从 MSIX 打包应用的终端里起程序会被文件系统 / 注册表虚拟化」一条。
 - 新增 `docs/guide/`：给现场用户的《安装与配置指南》PDF（Windows 实拍截图、带书签）及其源文件。
+- 修：在设置页改了云端地址（仿真 ↔ 真机）后，左下角的模式标识不刷新（只在 SSE `hello` 时设一次，桌面壳又没有刷新键）。
+  现在每次收到状态快照都核对 `mode`，保存后几秒内自动变；指南 §6.1 与常见问题同步改。
 - 只读代码审查（子代理）后修的：Windows CI 的 stdout 编码（`PYTHONUTF8` + `reconfigure`）；macOS 自动更新要 zip 目标且按架构分通道
   （`latest-arm64` / `latest-x64`）；崩溃重启不再漏 mock 网关；退出流程不可重入、`Backend.stop()` 幂等；
   后端子进程 `PYTHONDONTWRITEBYTECODE=1`；Windows 上 uv 的 junction 别名能删掉；`macos-15-intel` runner。

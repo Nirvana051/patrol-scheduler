@@ -65,6 +65,9 @@ function renderMode() {
 // ── 顶栏状态灯 ──────────────────────────────────────────────────────────────
 function setStatus(s) {
   store.status = s;
+  // 左下角模式标识跟着状态快照走：hello 只在连上时来一次，之后在设置页改了 CX_HOST（mock ↔ real）不会再来，
+  // 桌面壳又没有刷新键 —— 不跟着这里改，就会一直显示连上那一刻的模式
+  if (s && s.mode && s.mode !== store.mode) { store.mode = s.mode; renderMode(); }
   store.emit('robot_status', s);
   const L = document.getElementById('lights');
   const set = (k, cls, text) => { const el = L.querySelector(`[data-k=${k}]`); el.className = `light ${cls}`; el.lastChild.textContent = text; };
