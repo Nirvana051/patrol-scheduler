@@ -14,7 +14,7 @@ Electron 只做壳（拉起后端、窗口、托盘、优雅退出、仿真模�
 | D4 | Electron 壳 | `desktop/`：main.js 拉起后端、等健康检查、窗口、托盘菜单（打开页面 / 仿真模式 / 状态 / 数据目录 / 开机自启 / 检查更新 / 退出）、退出前确认并走 shutdown 接口、崩溃拉起、单实例、端口自选、`--smoke` 自检模式 | **已做**：开发态 `--smoke` 通过（起 2.2 s / 停 0.4 s）；`--screenshot` 截到真实窗口（docs/screenshots/10、11）；托盘菜单的各项在本机没人工点过 |
 | D5 | 打包与 CI | electron-builder（Windows NSIS + zip，macOS dmg + zip，Linux AppImage + deb；runtime 与后端代码作为 extraResources）；GitHub Actions 三平台矩阵：组装 runtime → 全量用例 → 打包 → 产物；打 tag 发 Release 与更新元数据 | **已写**：本机出了 Linux AppImage（260 MB，含 runtime 预编译 pyc）并用 `--smoke` 验过打包后的布局；工作流**未推送、未在 GitHub 上跑过**；子代理只读审查抓到的 4 条确认问题（Windows 编码、mac 更新通道、mock 泄漏、退出重入）已修 |
 | D6 | 文档与记账 | `docs/DESKTOP.md`（架构、构建、发布、排障）；USAGE §1 桌面版；deploy/README 三平台；HANDOFF / task.md §12 改写决策；CHANGELOG 0.8.0；DEVLOG | **已做**（`make docs-check` 通过为准） |
-| D7 | 测试（开发完成后） | Ubuntu 全量用例（.venv 3.12 与 runtime 各一遍）；Electron `--smoke`；本地出一个 AppImage 装上跑仿真；CI 三平台全绿；用户在 Windows / mac 上真机冒烟 | **部分**：Ubuntu 全量用例 `.venv`(3.12) 与 runtime(3.12) 各一遍、`--smoke` 开发态与 AppImage 各一次已过；**CI 与 Windows / mac 未跑**（下一步：推送后看 Actions 四个作业） |
+| D7 | 测试（开发完成后） | Ubuntu 全量用例（.venv 3.12 与 runtime 各一遍）；Electron `--smoke`；本地出一个 AppImage 装上跑仿真；CI 三平台全绿；用户在 Windows / mac 上真机冒烟 | **部分**：Ubuntu 全量用例 `.venv`(3.12) 与 runtime(3.12) 各一遍、`--smoke` 开发态与 AppImage 各一次已过；**Windows 步骤 A–D 已跑（2026-10-03，记录见下）**：runtime 176 用例全过、壳自检过、NSIS 包能装能卸、仿真跑一趟 completed、托盘各项与执行中退出都过；只剩播报出声没人耳听；**CI 与 mac 未跑**（下一步：推送后看 Actions 四个作业） |
 | D8 | 用户侧事项 | 签名（Apple Developer；Windows 证书或 Azure Trusted Signing）；一台 Windows 与一台 mac 做冒烟；GitHub Releases 作为更新渠道 | 等用户 |
 
 **下一步（按顺序）**：① 提交并推送本次改动，看 Actions 四个作业（第一次跑大概率要修 Windows / mac 的小问题，比如 PBS 的 Windows 布局、
@@ -24,7 +24,74 @@ Electron 只做壳（拉起后端、窗口、托盘、优雅退出、仿真模�
 - **桌面版没有 cron**：媒体清理（`scripts/cleanup_media.py`）与数据库备份（`scripts/backup_db.py`）在 Linux 上靠 cron（deploy/README §2），
   装了桌面版的 Windows / mac 没有这一环，`data/media` 会无限增长（T14 的桌面版形态）。做法：进程内定时（`ScheduleRunner` 每天一次）+
   设置项「媒体保留天数」，默认 30 天；备份同理。
-- **托盘菜单与自动更新只在 Ubuntu 上看过壳的日志，没在 Windows / mac 上点过**：第一次 CI 产包后要人工过一遍 DESKTOP.md §2 的每一项。
+- **托盘菜单与自动更新没在 mac 上点过**（Windows 已逐项点过，见下方实测记录）：第一次 CI 产包后要在 mac 上人工过一遍 DESKTOP.md §2 的每一项。
+
+**Windows 实测记录（2026-10-03，按 WINDOWS_TEST.md 跑 A → D）**
+
+环境：Windows 11 Pro 10.0.26200 x64；Node 22.23.3 / npm 10.9.9、MinGit 2.56.0（都是免安装版）；跑脚本的 Python 是 Microsoft Store 的 3.12.10；
+没开长路径（仓库放在短路径下）；本机没装 uv（走了脚本自己 pip 装 uv 那条路）。
+
+- **A**：`build_runtime.py --dev --prune` ✅ 313 MB（`--prune` 只省 2 MB）；runtime 3.12.13 跑全量 **176 passed，4 分 28 秒，0 跳过**（ffmpeg 抓帧那条跑了）。
+- **B**：`npx electron . --smoke` ✅ `start_ms` 2922 / `stop_ms` 419（打包前那次 3620 / 416），python 3.12.13，ffmpeg 与字体都在 `runtime\`，无残留进程。
+- **C**：`build_desktop.py --target "nsis zip"` ✅ 2 分 54 秒：`PatrolScheduler-0.8.0-win-x64.exe` 196.9 MB、`.zip` 262.7 MB、`latest.yml`；未签名。
+- **D**（✅ 过 · ⏸ 没测到 · ❌ 不符）：
+  - ✅ 静默安装到 `%LOCALAPPDATA%\Programs\PatrolScheduler`，开始菜单与桌面都有「巡检调度系统」；控制面板有卸载项
+  - ✅ 第一次启动弹「第一次启动」，窗口落在「设置」页；✅ 托盘图标在（默认收在「隐藏的图标」里）
+  - ✅ 托盘菜单齐全：打开页面 / 打开设置 / 当前：仿真模式（灰） / 仿真模式 ✓ / 状态… / 打开数据目录 / 打开日志目录 / 开机自启 / 检查更新… / 退出（会先停下机器人）
+  - ✅ 仿真模式：左下 MOCK · 仿真、顶栏在线绿灯、数据目录 `data-mock`；托盘取消勾 → 5 s 切到真机（数据目录 `data`、mock 网关进程退出、通知「已切到真机模式」、菜单显示「当前：真机模式」），
+    再勾上 → 5 s 切回（mock 网关重新拉起、执行记录还在）
+  - ✅ 「状态…」对话框：模式 / 云端 / 版本 / 端口 / 三个线程 ✓ / 执行中 / Python 3.12.13 / ffmpeg、runtime、字体都指向安装目录 / 数据目录
+  - ✅ 设置页「运行环境」原文：`Python 3.12.13 · 自带运行时 runtime · ffmpeg 有 · 中文字体 NotoSansCJKsc-Regular · win32`
+  - ✅ 总览「抓一张全景」出图，标注中文正常（不是方块）；检查结果的标注图（机头线、角度区间）中文也正常
+  - ✅ `seed_demo.py --reset --init --run --mock-speed 6`：4 段、3 次检查全过，completed；全景 / 裁切 / 标注 / 回答 / 播报句 / edge mp3 都在且都能取到
+  - ✅ 关窗：进程还在、右下角弹「巡检调度系统还在运行 / 已收到托盘…」通知，托盘单击或「打开页面」窗口回来；⏸ 播报从扬声器出声（本机扬声器静音，没人耳听）
+  - ✅ 「打开数据目录」开的是 `%APPDATA%\PatrolScheduler\data-mock`，「打开日志目录」里有 `desktop.log` / `backend.out` / `mock.out`
+  - ✅ 「开机自启」：勾上 → `HKCU\…\Run` 多一项 `cn.patrolscheduler.desktop = "…\PatrolScheduler.exe"`，取消 → 删掉；菜单勾选状态跟着变
+  - ✅ 「检查更新…」：弹「检查更新失败 / No published versions on GitHub」，不崩；启动时的自动检查同样只记 warn
+  - ✅ 执行中点托盘「退出」：弹「有巡检正在执行。退出会中止这趟执行并让机器人停下（最多等 40 秒）。」；点「取消」程序与执行照旧；
+    点「中止并退出」**2.1 s** 内 6 个进程（壳 4 + 后端 + mock 网关）全部消失，无 python / ffmpeg 残留，`backend.out` 退出码 0；
+    `app.log`：`shutdown_requested → run_abort_requested → task_stop_confirmed（1.5 s 后 IDLE）→ run_finished aborted`，mock 网关收到 `DELETE /v1/robots/…/task`
+  - ✅ 再次启动：仿真模式记得，执行记录在（#3 显示 aborted / 人工中止；卸载重装后记录也在）
+  - ❌ 真机模式下页面仍显示 MOCK · 仿真（数据目录切到 `data`、顶栏离线都对；见下「通用」第 1 条）
+  - ⚠ 只出现过一次：执行中点托盘「退出」，确认框弹在了别的窗口（当时在前台的 Chrome）**后面**，看起来像「点了退出没反应」；
+    之后 4 次（退出 1 次、在资源管理器在前台时点「状态…」3 次）对话框都正常到了最前。疑似当时用户正在操作别的窗口、Windows 前台锁不让它抢。
+    若现场再遇到：给确认框传父窗口（先 `showWindow()` 再弹）或 `win.flashFrame(true)` 提示
+  - ✅ 卸载：程序目录、卸载项、安装键、两个快捷方式都删了；`%APPDATA%\PatrolScheduler` 保留
+
+**第二轮（同日，从零重跑一遍，全程在 MSIX 沙箱外）**：删掉 `runtime/`、`runtime.cache/`、`node_modules`，卸载旧包，用户数据目录整个挪走，再按 A → D 走一遍。
+
+- **A**：组装 runtime 49 s（这次真的走了「没装 uv → pip 装 uv」，修过的那条路一次过）314 MB；全量 **176 passed in 271.72 s**；`--check`、`check_docs.py` 过。
+- **B**：`npm ci` 过；`--smoke` 2656 / 426 ms（打包前那次 2396 / 211 ms）。**C**：126 s，`.exe` 197.7 MB、`.zip` 263.6 MB。
+- **D**：这次用**图形界面安装**：「安装选项」（默认「仅为我安装」）→「选定安装位置」（`%LOCALAPPDATA%\Programs\PatrolScheduler`，所需 686.7 MB）→ 安装 33 s →「完成」（默认勾「运行 PatrolScheduler」）。
+  其余各项与第一轮相同，全部 ✅；新增与补充：
+  - ✅ 真机模式填占位云端（`https://cloud.invalid:8443`）并保存：「当前适配器」立刻变 REAL 真机、顶栏「云端不可达」；**左下角仍是 MOCK · 仿真，重启程序后才变 REAL · 真机**（见下「通用」第 5 条）
+  - ✅ 真机 / 仿真两套设置互不串：真机里填的占位地址，切回仿真后仍连内置 mock 网关
+  - ✅ 托盘「退出」（无执行）不弹确认，5 个进程 1.2 s 退完；执行中「中止并退出」7 个进程 0.9 s、另一次 6 个进程 2.3 s 退完，`DELETE …/task` → 200，云端 1.7 s 后 IDLE，执行 aborted
+  - 记一笔：有一次点「中止并退出」时正好最后一段到点，执行记为 completed 而不是 aborted（机器人已经停在终点，不用再停）—— 行为合理
+  - ✅ 退出确认框：这轮 3 次都自己到了最前；它没有父窗口，在任务栏上与主窗口合成一个按钮「PatrolScheduler - 2 个运行窗口」
+  - ✅ 用户文档 PDF 附录 B 里的一键演示命令（只用安装目录自带的 Python）原样照抄能跑：39 s，completed
+  - 只剩 ⏸ 播报出声没人耳听
+
+问题 —— **Windows**：
+1. **已修**：没装 uv 时 `build_runtime.py` 第一步就退出（「装了 uv 但找不到 …\tools\Scripts\uv.exe」）—— `pip install --target` 在 Windows 上也把 exe 放进 `bin\`。改成 `bin\` 与 `Scripts\` 都找。CI 用 setup-uv，碰不到这条。
+2. **已修**：WINDOWS_TEST §2 的 `$py` 少了 `runtime\` 前缀（`manifest.json` 里的路径相对 `runtime\`），照抄会「找不到 python.exe」。
+3. **已修**：文档与 CI 的 `pytest -q -p no:cacheprovider` 与 `pytest.ini` 的 addopts 叠成 `-qq`，结尾汇总行不打。
+4. 记一笔（不是问题）：Electron 44 的 npm 包没有 postinstall，`npm ci` 不下载二进制，第一次 `npx electron` 时才下；`build_desktop.py` 的 `install.js` 兜底照常起作用。
+5. 记一笔（测试方法）：从 MSIX 打包的应用（如 Claude 桌面版）里开的终端带文件系统 / 注册表虚拟化，从那里起的程序写 `%APPDATA%`、HKCU 会被重定向 —— 后端的 `/media` 全部 404（starlette 的 realpath 校验对不上）、安装包的注册表项外面看不到、卸载会漏删快捷方式。
+   经 explorer 起（双击快捷方式）就都正常，**不是产品问题**；已写进 WINDOWS_TEST §7。
+
+问题 —— **通用**（Ubuntu 上同样存在，未改）：
+1. **真机模式没填凭据时显示成 MOCK**：`CX_HOST` / `CX_KEY` 回落到 `config.py` `DEFAULTS` 里的 mock 值，而 `mode` 按 host 是否 127.0.0.1 推断 →
+   第一次启动的设置页预填 mock 地址与密钥、左下角 MOCK · 仿真，壳却没起 mock 网关，于是顶栏「云端不可达」。与 WINDOWS_TEST §5「页面变回真机模式」不符。
+   做法待定：壳在真机模式下传个标记（如 `PS_DESKTOP_MODE=real`），`Config` 据此不回落 mock 默认值、`mode` 以壳为准。
+2. **网络错误的原因被吞掉**：`app/robot/client.py` 去 HTML 标签的清洗把 urllib 的 `<urlopen error [WinError 10061] …>` 整段删了，
+   `events.last_error` 只剩「GET /events 网络失败:」。做法：`certaintyx.py` 拼消息用 `e.reason`，或清洗只删真正的 HTML 标签。
+3. `--smoke` 只核对抓图接口返回的 URL 形状，没去取那张图 —— 上面 Windows 第 5 条的 404 它就看不出来。做法：smoke 里再 `GET` 一次那个 URL。
+4. 安装包带着开发依赖：`requirements.lock` 里钉着 pytest / ruff（连带 Pygments、pluggy、iniconfig），带不带 `--dev` 都会装进 runtime 并打进安装包，
+   约 36 MB（ruff.exe 一个 25 MB）。做法：开发依赖从锁里拆出去（`--dev` 本来就会另装）。体积优先级最低，记着。
+5. **保存云端设置后左下角模式标识不刷新**：`web/js/app.js` 的 `renderMode()` 只在 SSE `hello` 时跑一次，存了 `CX_HOST` 后后端已是 real，
+   左下角仍显示 MOCK · 仿真；桌面壳去掉了菜单，没有 F5，用户只能重启程序（托盘「打开设置」只改 hash，不重新加载）。
+   做法：`PUT /api/settings` 重连后往总线发一条 `mode` 事件让前端 `renderMode()`，或设置页保存成功后 `location.reload()`。
 
 已知残留差异（不影响巡检主流程）：Windows 没有 uvloop，用标准 asyncio；Linux 桌面上浏览器朗读兜底可能无声（主路径是 edge 合成的 mp3）；edge-tts 三平台都要联网；桌面版不带 ffplay，`local` 汇出只在 PATH 里有 ffplay 时可用（窗口本身就是本机扬声器）。
 

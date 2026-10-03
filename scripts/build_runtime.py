@@ -157,18 +157,19 @@ def load_spec() -> dict:
 # ── uv：只用它下载固定版本的 python-build-standalone ────────────────────────
 def ensure_uv(cache: Path) -> str:
     uvname = 'uv.exe' if IS_WIN else 'uv'
-    for c in (shutil.which('uv'), Path.home() / '.local' / 'bin' / uvname, Path.home() / '.cargo' / 'bin' / uvname,
-              cache / 'tools' / ('Scripts' if IS_WIN else 'bin') / ('uv.exe' if IS_WIN else 'uv')):
+    tools = cache / 'tools'
+    # pip --target 在 Windows 上也把可执行文件放进 bin/（不是 Scripts/），两处都找
+    in_tools = [tools / 'bin' / uvname, tools / 'Scripts' / uvname]
+    for c in (shutil.which('uv'), Path.home() / '.local' / 'bin' / uvname, Path.home() / '.cargo' / 'bin' / uvname, *in_tools):
         if c and Path(c).is_file():
             return str(c)
     say('  没有 uv，用 pip 装一份到缓存目录（只用来下载 Python）…')
-    tools = cache / 'tools'
     r = run([sys.executable, '-m', 'pip', 'install', '-q', '--disable-pip-version-check', '--target', str(tools), 'uv'])
     if r.returncode != 0:
         fail('pip 装 uv 失败；手动装：curl -LsSf https://astral.sh/uv/install.sh | sh（Windows：winget install astral-sh.uv）')
-    exe = tools / ('Scripts' if IS_WIN else 'bin') / ('uv.exe' if IS_WIN else 'uv')
-    if not exe.is_file():
-        fail(f'装了 uv 但找不到 {exe}')
+    exe = next((p for p in in_tools if p.is_file()), None)
+    if exe is None:
+        fail(f'装了 uv 但找不到 {" 或 ".join(map(str, in_tools))}')
     return str(exe)
 
 

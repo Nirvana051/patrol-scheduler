@@ -19,6 +19,7 @@
 | **常驻部署**（systemd、cron 备份、反向代理） | [../deploy/README.md](../deploy/README.md) |
 | **桌面版**（Windows / macOS / Linux）：架构、构建发布、排障 | [DESKTOP.md](DESKTOP.md) |
 | **去 Windows 上测桌面版**：装什么、按什么顺序跑、记什么 | [WINDOWS_TEST.md](WINDOWS_TEST.md) |
+| **给现场用户**：桌面版安装、配置与使用手册（PDF，带截图） | [guide/](guide/README.md) |
 
 ## 几条贯穿全部文档的硬约束
 
@@ -47,7 +48,8 @@ docs/README.md ← 你在这里
   ├─ DEVLOG.md       逐时开发日志
   ├─ SCREENSHOTS.md  界面截图与真机全景样张
   ├─ DESKTOP.md      桌面版（自带运行时 + Electron 壳）
-  └─ WINDOWS_TEST.md 去 Windows 测桌面版的交接单
+  ├─ WINDOWS_TEST.md 去 Windows 测桌面版的交接单
+  └─ guide/          给现场用户的安装与配置指南（PDF + 源文件）
 ```
 
 `task.md` 的**源文件**在 `../../Sample_web_api/docs/task.md`（用户指定的位置，那边未被上游仓库跟踪），本目录里的是同步副本：改完源文件跑 `scripts/sync_task_doc.sh`，`TODO.md` / `ROADMAP.md` 也按 §9/§10 重新生成。

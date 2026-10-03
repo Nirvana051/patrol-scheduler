@@ -33,3 +33,4 @@ env.example text eol=lf
 *.woff2 binary
 *.pcd  binary
 *.db   binary
+*.pdf  binary

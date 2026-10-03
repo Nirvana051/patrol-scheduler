@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>巡检调度系统 桌面版 安装与配置指南</title>
+<style>
+  /* 正文用微软雅黑：Chromium 把 Noto/思源这类 CFF 字体嵌成 Type3，且会把「用」等字映射成康熙部首，PDF 里搜索、复制会出错 */
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  :root { --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; --brand: #1d4ed8; --brand-soft: #eff6ff; --warn: #b45309; --warn-soft: #fffbeb; --bad: #b91c1c; --bad-soft: #fef2f2; --ok: #047857; --ok-soft: #ecfdf5; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: "Microsoft YaHei", sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.65; margin: 0; }
+  h1, h2, h3 { font-weight: 700; line-height: 1.3; color: #111827; }
+  h1 { font-size: 19pt; margin: 0 0 10pt; padding-bottom: 6pt; border-bottom: 2.5pt solid var(--brand); break-before: page; }
+  h1 .num { color: var(--brand); margin-right: 8pt; }
+  h1.cont { break-before: auto; margin-top: 22pt; }   /* 短章节接着排，不单独起页 */
+  h2 { font-size: 13.5pt; margin: 16pt 0 6pt; break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 12pt 0 4pt; break-after: avoid; }
+  p { margin: 4pt 0 6pt; }
+  ul, ol { margin: 4pt 0 8pt; padding-left: 18pt; }
+  li { margin: 2pt 0; }
+  code, .mono { font-family: Consolas, monospace; font-size: 9.5pt; background: #f3f4f6; border-radius: 3pt; padding: 0 3pt; }
+  pre { font-family: Consolas, monospace; font-size: 8.8pt; background: #f8fafc; border: 1px solid var(--line); border-radius: 5pt; padding: 7pt 9pt; white-space: pre-wrap; word-break: break-all; break-inside: avoid; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.6pt; break-inside: auto; }
+  th, td { border: 1px solid var(--line); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; font-weight: 700; }
+  tr { break-inside: avoid; }
+  .kbd { display: inline-block; border: 1px solid #cbd5e1; border-bottom-width: 2px; border-radius: 3pt; padding: 0 4pt; font-size: 9pt; background: #fff; }
+  .ui { font-weight: 700; color: #111827; }
+  .box { border-radius: 6pt; padding: 7pt 10pt; margin: 8pt 0; break-inside: avoid; border-left: 4pt solid; }
+  .box.tip { background: var(--brand-soft); border-color: var(--brand); }
+  .box.warn { background: var(--warn-soft); border-color: #f59e0b; }
+  .box.bad { background: var(--bad-soft); border-color: var(--bad); }
+  .box.ok { background: var(--ok-soft); border-color: var(--ok); }
+  .box b.t { display: block; margin-bottom: 2pt; }
+  figure { margin: 8pt 0 10pt; text-align: center; break-inside: avoid; }
+  figure img { max-width: 86%; border: 1px solid var(--line); border-radius: 4pt; }
+  figure img.half { max-width: 56%; }
+  figure img.third { max-width: 46%; }
+  figcaption { font-size: 8.8pt; color: var(--muted); margin-top: 3pt; }
+  .steps { counter-reset: s; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 24pt; margin: 5pt 0; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: 1pt; width: 16pt; height: 16pt; border-radius: 50%; background: var(--brand); color: #fff; font-size: 8.5pt; font-weight: 700; text-align: center; line-height: 16pt; }
+  .two { display: flex; gap: 10pt; align-items: flex-start; }
+  .two > * { flex: 1; }
+  /* 封面 */
+  .cover { height: 245mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover .top { margin-top: 38mm; }
+  .cover .kicker { color: var(--brand); font-weight: 700; letter-spacing: 2pt; font-size: 11pt; }
+  .cover .title { font-size: 30pt; font-weight: 700; margin: 8pt 0 4pt; color: #0f172a; }
+  .cover .sub { font-size: 15pt; color: #334155; }
+  .cover .bar { width: 60mm; height: 4pt; background: var(--brand); margin: 16pt 0; }
+  .cover .meta { font-size: 10pt; color: var(--muted); line-height: 1.9; }
+  .cover .meta b { color: #334155; }
+  .toc { break-before: page; }
+  .toc h2 { font-size: 16pt; margin-top: 0; }
+  .toc ol { list-style: none; padding-left: 0; columns: 1; }
+  .toc li { padding: 4pt 0; border-bottom: 1px dotted #d1d5db; display: flex; justify-content: space-between; }
+  .toc li span.n { color: var(--brand); font-weight: 700; width: 26pt; display: inline-block; }
+  .toc li .d { color: var(--muted); font-size: 9pt; }
+  .flow { display: flex; align-items: stretch; gap: 4pt; margin: 8pt 0 10pt; break-inside: avoid; }
+  .flow div { flex: 1; background: var(--brand-soft); border: 1px solid #bfdbfe; border-radius: 5pt; padding: 5pt 6pt; font-size: 9pt; text-align: center; }
+  .flow div b { display: block; font-size: 9.5pt; color: var(--brand); }
+  .flow i { align-self: center; color: var(--brand); font-style: normal; font-weight: 700; }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- ───────────── 封面 ───────────── -->
+<section class="cover">
+  <div class="top">
+    <div class="kicker">PATROLSCHEDULER · 桌面版</div>
+    <div class="title">巡检调度系统</div>
+    <div class="sub">安装与配置指南（Windows）</div>
+    <div class="bar"></div>
+    <div class="meta">
+      <div><b>适用版本</b>　0.8.0</div>
+      <div><b>适用系统</b>　Windows 10 / 11（64 位）；macOS、Linux 见附录 C</div>
+      <div><b>适用对象</b>　现场操作员、实施与运维人员</div>
+      <div><b>文档日期</b>　2026 年 10 月</div>
+    </div>
+  </div>
+  <div class="meta small">本指南覆盖：安装 → 第一次启动 → 仿真模式试用 → 接入真机 → 配置视觉判读与播报 → 完成一次巡检 → 日常使用、更新、卸载与常见问题。<br>
+  界面截图取自 Windows 11 上的 0.8.0 版本。</div>
+</section>
+
+<!-- ───────────── 目录 ───────────── -->
+<section class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><span><span class="n">1</span>认识巡检调度系统</span><span class="d">它做什么、两个名词</span></li>
+    <li><span><span class="n">2</span>安装前准备</span><span class="d">电脑要求、要提前拿到的信息</span></li>
+    <li><span><span class="n">3</span>安装</span><span class="d">运行安装包、安全提示、安装位置</span></li>
+    <li><span><span class="n">4</span>第一次启动</span><span class="d">提示框、窗口、托盘图标</span></li>
+    <li><span><span class="n">5</span>先在仿真模式里试一遍</span><span class="d">不需要机器人</span></li>
+    <li><span><span class="n">6</span>接入真机</span><span class="d">填写凭据、前置检查、初始化、机头校准</span></li>
+    <li><span><span class="n">7</span>配置视觉判读（VLM）与语音播报（TTS）</span><span class="d">提供方、汇出方式</span></li>
+    <li><span><span class="n">8</span>做一次完整巡检</span><span class="d">地图 → 任务航点 → 任务 → 执行 → 定时</span></li>
+    <li><span><span class="n">9</span>日常使用</span><span class="d">托盘菜单、退出、开机自启、数据与备份</span></li>
+    <li><span><span class="n">10</span>更新与卸载</span><span class="d"></span></li>
+    <li><span><span class="n">11</span>安全须知（真机）</span><span class="d"></span></li>
+    <li><span><span class="n">12</span>常见问题</span><span class="d"></span></li>
+    <li><span><span class="n">A</span>附录 A　设置项速查</span><span class="d"></span></li>
+    <li><span><span class="n">B</span>附录 B　文件与目录位置</span><span class="d"></span></li>
+    <li><span><span class="n">C</span>附录 C　macOS 与 Linux</span><span class="d"></span></li>
+  </ol>
+</section>
+
+<!-- ───────────── 1 ───────────── -->
+<h1><span class="num">1</span>认识巡检调度系统</h1>
+<p>巡检调度系统是运行在现场电脑上的<b>巡检操作台</b>：它通过 certaintyX 云端接口指挥机器狗按路线巡检，到每个巡检点拍一张 360° 全景，交给视觉大模型（VLM）判断「是 / 不是」，再把结论用语音播报出来，全过程留档。</p>
+<div class="flow">
+  <div><b>定义巡检点</b>去哪儿、看什么、<br>怎么判、怎么播报</div><i>→</i>
+  <div><b>分段下发</b>起点 → 巡检点 1 →<br>巡检点 2 → …</div><i>→</i>
+  <div><b>到点检查</b>拍全景 → 裁切<br>→ VLM 判是/不是</div><i>→</i>
+  <div><b>播报与留档</b>语音播报；图片、<br>结论、事件全部入库</div>
+</div>
+<p>为什么要「分段下发」：机器狗走一条路径时中途不会停。所以系统把每个巡检点单独下发一段，机器人到点后才能停下来拍照判读，再下发下一段。</p>
+<h2>两个必须分清的名词</h2>
+<table>
+  <tr><th style="width:18%"></th><th>含义</th><th style="width:22%">来自</th></tr>
+  <tr><td><b>导航航点</b></td><td>地图自带的点，编号 1、2、12…，带坐标和连通关系</td><td>机器人的地图（只读）</td></tr>
+  <tr><td><b>任务航点</b></td><td>你定义的巡检点：落在某个导航航点上，并带有检查问题（prompt）、全景角度范围、答案模版、参考图</td><td>本系统</td></tr>
+</table>
+<h2>桌面版的构成</h2>
+<p>安装包里已经带好了程序运行需要的一切（固定版本的 Python 3.12 运行时、全部依赖、ffmpeg 抓图工具、中文字体），<b>不需要另外安装 Python 或其他软件</b>。程序由两部分组成：</p>
+<ul>
+  <li><b>窗口与托盘图标</b>：你看到的界面。关闭窗口只是把它收进托盘，巡检和定时计划照常运行。</li>
+  <li><b>后台服务</b>：真正指挥机器人的部分，随窗口自动启动、自动停止。它只在本机 <code>127.0.0.1</code> 上提供服务，局域网里的其他电脑访问不到。</li>
+</ul>
+
+<!-- ───────────── 2 ───────────── -->
+<h1><span class="num">2</span>安装前准备</h1>
+<h2>2.1 电脑要求</h2>
+<table>
+  <tr><th style="width:24%">项目</th><th>要求</th></tr>
+  <tr><td>操作系统</td><td>Windows 10 或 Windows 11，64 位（x64）</td></tr>
+  <tr><td>磁盘空间</td><td>安装后约 700 MB；另外为巡检图片与数据库预留空间（每次检查约 0.1–0.2 MB 图片）</td></tr>
+  <tr><td>权限</td><td>普通用户即可，<b>不需要管理员权限</b></td></tr>
+  <tr><td>网络</td><td>接真机时要能访问云端地址（如 <code>https://certaintyx.sg:8443</code>）；在线语音合成（edge）、云端 VLM（如通义千问）也需要联网。只在仿真模式下试用可以不联网</td></tr>
+  <tr><td>抓图</td><td>真机抓全景走 RTSP（端口 8554）。若该端口被防火墙挡住，可改用 HLS（见 §6.2）</td></tr>
+</table>
+<h2>2.2 接真机前要拿到的信息</h2>
+<p>只在仿真模式里试用时，以下都不需要。接真机前，请找管理员在云端管理界面的「API 接入」里拿到：</p>
+<table>
+  <tr><th style="width:24%">信息</th><th>示例</th><th>说明</th></tr>
+  <tr><td>云端地址</td><td><code>https://certaintyx.sg:8443</code></td><td>由管理员提供</td></tr>
+  <tr><td>机器人别名</td><td><code>ntu-dog-00001</code></td><td>填<b>别名</b>，不要填机器人 ID</td></tr>
+  <tr><td>API 密钥</td><td><code>cx_xxxxxxxx_…</code></td><td>角色为 operator、租约模式为 auto</td></tr>
+  <tr><td>VLM 密钥（可选）</td><td><code>sk-…</code></td><td>使用通义千问等云端模型时需要（见 §7）</td></tr>
+</table>
+<div class="box warn"><b class="t">密钥要保管好</b>密钥只保存在本机的后台服务里，界面上永远只显示掩码。不要把密钥发到聊天群或写在共享文档里。</div>
+
+<!-- ───────────── 3 ───────────── -->
+<h1><span class="num">3</span>安装</h1>
+<h2>3.1 运行安装包</h2>
+<ol class="steps">
+  <li>拿到安装包 <code>PatrolScheduler-0.8.0-win-x64.exe</code>（约 197 MB），双击运行。</li>
+  <li>若出现蓝色的「<b>Windows 已保护你的电脑</b>」提示：点<span class="ui">更多信息</span>，再点<span class="ui">仍要运行</span>。<br><span class="small">这是因为当前安装包还没有做代码签名，属于正常现象；签名后这个提示会消失。</span></li>
+  <li><b>安装选项</b>：保持默认的「<b>仅为我安装</b>」，点<span class="ui">下一步</span>。<br><span class="small">选「为使用这台电脑的任何人安装（所有用户）」需要管理员权限，一般不需要。</span></li>
+  <li><b>选定安装位置</b>：默认装在当前用户目录下（所需空间约 690 MB），一般不用改；要换位置点<span class="ui">浏览</span>。然后点<span class="ui">安装</span>，大约半分钟装完。</li>
+  <li><b>完成</b>：保持勾选「运行 PatrolScheduler」，点<span class="ui">完成</span>，程序会自动启动。</li>
+</ol>
+<div class="two">
+  <figure><img style="max-width:100%" src="img/install-1-options.png"><figcaption>图 3-1　安装选项</figcaption></figure>
+  <figure><img style="max-width:100%" src="img/install-2-folder.png"><figcaption>图 3-2　选定安装位置</figcaption></figure>
+  <figure><img style="max-width:100%" src="img/install-3-finish.png"><figcaption>图 3-3　完成，勾选「运行」</figcaption></figure>
+</div>
+<h2>3.2 装好之后</h2>
+<ul>
+  <li>开始菜单和桌面上都会出现「<b>巡检调度系统</b>」快捷方式。</li>
+  <li>默认安装位置：<code>%LOCALAPPDATA%\Programs\PatrolScheduler</code></li>
+  <li>在 Windows「设置 → 应用 → 已安装的应用」里显示为 <b>PatrolScheduler 0.8.0</b>。</li>
+</ul>
+
+<!-- ───────────── 4 ───────────── -->
+<h1><span class="num">4</span>第一次启动</h1>
+<p>第一次启动会弹出「第一次启动」提示框，窗口直接停在<span class="ui">设置</span>页，等你填写云端连接信息。点<span class="ui">知道了</span>关闭提示框。</p>
+<figure><img class="half" src="img/firstrun-dialog.png"><figcaption>图 4-1　第一次启动的提示框</figcaption></figure>
+<div class="box tip"><b class="t">还没准备好真机信息？</b>可以先在托盘菜单里勾选「仿真模式」，用内置的仿真机器狗把所有功能试一遍（见第 5 章）。仿真数据与真机数据分开保存，互不影响。</div>
+<h2>4.1 托盘图标在哪里</h2>
+<p>程序运行时，任务栏右下角的通知区域里有一个蓝色圆形图标。Windows 默认会把新图标收在「<b>^</b>」（显示隐藏的图标）里，点开就能看到。</p>
+<ul>
+  <li><b>左键单击</b>托盘图标：打开窗口。</li>
+  <li><b>右键单击</b>托盘图标：打开托盘菜单（各项说明见 §9.1）。</li>
+</ul>
+<div class="box tip"><b class="t">让图标常驻任务栏</b>Windows 11：设置 → 个性化 → 任务栏 → 其他系统托盘图标，打开「PatrolScheduler」。Windows 10：把图标从「^」里拖到任务栏上。</div>
+<h2>4.2 关闭窗口 ≠ 退出程序</h2>
+<p>点窗口右上角的 × 只是把窗口收进托盘，巡检与定时计划会继续执行。第一次这样做时右下角会弹出通知提醒你。要彻底退出，请用托盘菜单里的<span class="ui">退出（会先停下机器人）</span>（见 §9.2）。</p>
+<figure><img class="half" src="img/toast-tray.png"><figcaption>图 4-2　关闭窗口后的提醒</figcaption></figure>
+
+<!-- ───────────── 5 ───────────── -->
+<h1><span class="num">5</span>先在仿真模式里试一遍</h1>
+<p>仿真模式会在本机启动一只「仿真机器狗」：<b>不需要机器人、不需要密钥，不会让任何真实设备动起来</b>。建议第一次使用时先在这里把整个流程走一遍。</p>
+<ol class="steps">
+  <li>右键托盘图标，勾选<span class="ui">仿真模式</span>。几秒后页面自动刷新，右下角弹出「已切到仿真模式」的通知。</li>
+  <li>确认窗口左下角显示绿色的 <b>MOCK · 仿真</b>，顶栏第一个灯是绿色的「在线」。</li>
+  <li>在<span class="ui">总览</span>页点<span class="ui">📷 抓一张全景</span>，右下方会出现一张合成的 360° 全景图，图上的中文标注应清晰可读。</li>
+  <li>按第 8 章的步骤建任务航点、建任务并执行，在<span class="ui">执行监控</span>里观察分段进度与检查结果。</li>
+</ol>
+<figure><img src="img/dashboard-mock.png"><figcaption>图 5-1　仿真模式下的总览页：左下角 MOCK · 仿真，顶栏「在线」为绿灯，右下方是刚抓的全景</figcaption></figure>
+<div class="box ok"><b class="t">仿真里有现成的演示地图</b>仿真机器狗自带一张演示地图（含导航航点、合成的全景画面：配电箱、安全出口、地面方格、消防栓柜、立柱等），可以直接拿来练习划定角度、写检查问题。想一键灌入演示数据，见附录 B 末尾的命令。</div>
+<p>试完后，在托盘里<b>取消勾选</b>「仿真模式」即可回到真机模式；仿真里建的数据保留在仿真自己的数据目录里，下次勾选时还在。</p>
+
+<!-- ───────────── 6 ───────────── -->
+<h1><span class="num">6</span>接入真机</h1>
+<div class="box bad"><b class="t">先退出仿真模式，再填写真机信息</b>仿真模式与真机模式各有一套独立的设置和数据。请先右键托盘图标、<b>取消勾选「仿真模式」</b>（托盘菜单第三行显示「当前：真机模式」），再到设置页填写。在仿真模式里填写的地址和密钥不会用于真机。</div>
+<h2>6.1 填写云端连接</h2>
+<ol class="steps">
+  <li>托盘菜单 → <span class="ui">打开设置</span>，或在窗口左侧点<span class="ui">⚙ 设置</span>。</li>
+  <li>在「<b>云端连接（改动会重建连接）</b>」一栏填写：<b>云端地址</b>、<b>机器人别名</b>、<b>API 密钥</b>。</li>
+  <li>在「<b>抓图与执行</b>」一栏把<b>抓图源</b>改为 <code>rtsp</code>。</li>
+  <li>点右上角<span class="ui">保存</span>。系统会立即用新地址重建云端连接，右侧「当前适配器」的模式随即变为 <b>REAL 真机</b>。</li>
+  <li><b>从托盘「退出」程序，再重新打开一次</b>，左下角就会变为橙色 <b>REAL · 真机</b>。之后机器人在线时顶栏「在线」灯为绿色；机器人未开机或网络不通时显示「离线」或「云端不可达」。</li>
+</ol>
+<figure><img src="img/settings-connection.png"><figcaption>图 6-1　真机模式的设置页：左下角 REAL · 真机，右侧「当前适配器」为 REAL 真机（图中地址为示意，机器人未连接所以顶栏显示「云端不可达」）</figcaption></figure>
+<div class="box warn"><b class="t">填写之前看到 MOCK 是正常的</b>在真机模式下还没填写云端地址时，地址一栏显示的是默认占位值 <code>http://127.0.0.1:18443</code>，左下角会显示「MOCK · 仿真」、顶栏显示「云端不可达」。填好真实地址、保存，再重新打开一次程序，就会变为 REAL · 真机。</div>
+<div class="box tip"><b class="t">优先级</b>设置页右上角写着「此处设置 &gt; config/.env &gt; 默认值」。桌面版只需要在设置页里改，<b>不需要编辑任何配置文件</b>。</div>
+
+<h2>6.2 执行前置检查</h2>
+<p>在<span class="ui">总览</span>页点<span class="ui">↻ 刷新状态</span>，系统会列出七项执行前置检查。<b>七项全部通过才能执行任务</b>：</p>
+<table>
+  <tr><th style="width:26%">检查项</th><th>不通过时怎么办</th></tr>
+  <tr><td>云端网关可达</td><td>检查网络、云端地址是否填对</td></tr>
+  <tr><td>机器人在线</td><td>确认机器人已开机并联网</td></tr>
+  <tr><td>无急停指令</td><td>点提示旁的「取消急停」</td></tr>
+  <tr><td>ROS 可用</td><td>机器人端 ROS 未运行，读到的都是旧数据；联系机器人维护人员</td></tr>
+  <tr><td>定位就绪</td><td>按 §6.3 做「② 启动设备」与「④ 定位」</td></tr>
+  <tr><td>云端无进行中的任务</td><td>若提示中路径为空（通常是刚做过定位的残留），点「停任务」；若是别人下发的任务，等它结束</td></tr>
+  <tr><td>控制权可用</td><td>现场有人在操作机器人，等对方放手</td></tr>
+</table>
+<p class="small">抓图源：<code>rtsp</code> 是首选；若 8554 端口被防火墙挡住，改为 <code>hls</code>（抓帧更快但画面会落后 2–3 秒）。</p>
+
+<h2>6.3 机器人初始化（真机必需，一次性）</h2>
+<p>在<span class="ui">总览 → 机器人初始化</span>里<b>按顺序</b>做一次（机器人不重启、不丢定位就不用重做）：</p>
+<ol class="steps">
+  <li><span class="ui">② 启动设备</span>：在机器人上启动导航、定位等模块。漏掉这一步，任务会「下发成功但机器人不动」。</li>
+  <li><span class="ui">④ 定位</span>：选择地图，再选择<b>机器人此刻真实所在（或最接近）的导航航点</b>，点定位。最多等 20 秒；偏差超过 3 米判为失败。</li>
+  <li>顶栏「定位」灯变绿即完成。</li>
+</ol>
+<div class="box bad"><b class="t">定位初值必须是机器人真实所在的航点</b>选错了，要么定位失败，要么定位到错误的位置，之后巡检会朝错误方向走，有物理风险。</div>
+
+<h2>6.4 机头校准（真机第一次使用时做一次）</h2>
+<p>全景图上机器人正前方对应哪一列，需要标定一次，任务航点编辑器里「相对机头 ±N°」的读数才准：</p>
+<ol class="steps">
+  <li>让机器人朝向一个已知的地标停下。</li>
+  <li>设置页 →「<b>机头校准（FORWARD_DEG）</b>」→ 点<span class="ui">📷 抓一张全景</span>。</li>
+  <li>把画面上的蓝色虚线拖到机器人正前方所在的位置，点<span class="ui">保存为 FORWARD_DEG</span>。</li>
+</ol>
+
+<!-- ───────────── 7 ───────────── -->
+<h1><span class="num">7</span>配置视觉判读（VLM）与语音播报（TTS）</h1>
+<h2>7.1 视觉判读（设置 → VLM 视觉判读）</h2>
+<table>
+  <tr><th style="width:18%">提供方</th><th>用法</th></tr>
+  <tr><td><code>mock</code></td><td>不调用模型，交替回答「是 / 不是」。用于打通流程或演示（默认值）</td></tr>
+  <tr><td><code>qwen</code></td><td>阿里通义千问（DashScope）。<b>OpenAI 兼容地址留空</b>即可；模型填 <code>qwen3.5-flash</code>（图片被拒时换 <code>qwen3-vl-plus</code> / <code>qwen-vl-max</code>）；API Key 填 DashScope 的 <code>sk-…</code></td></tr>
+  <tr><td><code>openai_compat</code></td><td>任何 OpenAI 兼容服务：本机 Ollama（<code>http://127.0.0.1:11434/v1</code>，模型如 <code>qwen2.5vl:7b</code>）、vLLM、LM Studio、OpenAI</td></tr>
+  <tr><td><code>anthropic</code></td><td>Anthropic 官方接口：填 Anthropic API Key 与模型名</td></tr>
+</table>
+<p>填好后点<span class="ui">保存</span>，再到任务航点编辑器的「试问 VLM」里点<span class="ui">用参考图</span>验证（见 §8.2），这一步不会让机器人动。</p>
+<p class="small">「附整张全景」= 除了裁切图外再发一张带角度标注的整图，模型能看到更多上下文，但每次调用更贵。</p>
+
+<h2>7.2 语音播报（设置 → TTS 播报）</h2>
+<p><b>引擎</b>决定怎么把文字变成声音：<code>edge</code> = 微软在线合成，音色好，需要联网（默认）；<code>none</code> = 不合成，文字交给网页朗读或发给机器人本地离线合成；<code>command</code> = 调用命令行 TTS 程序（高级用法）。<b>汇出</b>决定在哪里播放，可以多选，用英文逗号分隔：</p>
+<table>
+  <tr><th style="width:18%">汇出</th><th>播放位置</th></tr>
+  <tr><td><code>robot</code></td><td><b>机器狗自带的扬声器</b>（推荐真机使用；需要机器人固件 2026-09-14 或更新）</td></tr>
+  <tr><td><code>browser</code></td><td>本程序窗口（也就是这台电脑的扬声器）。网页需先点一下顶栏「🔊 声音」解除自动播放限制</td></tr>
+  <tr><td><code>http</code></td><td>项目自带的播报服务（旧固件没有播报接口时的替代方案，需要实施人员部署）</td></tr>
+  <tr><td><code>webhook</code></td><td>把播报内容 POST 到指定地址</td></tr>
+</table>
+<div class="box tip"><b class="t">推荐的真机组合</b>
+<b>汇出</b>填 <code>robot,browser</code>：机器狗现场播报，同时电脑上也能听到。<br>
+<b>引擎</b>选 <code>edge</code>：音色好，推不成时会自动退回文字由机器人自己念；如果调度电脑不能上外网，选 <code>none</code>，由机器人离线合成。<br>
+<b>机器人音量</b>设一次，机器人会记住；<b>播完再继续</b>保持 0（边走边播）可以节省时间。</div>
+<p>设置页「当前适配器」卡片里可以输入一句话点<span class="ui">▶ 试听 TTS</span>，<span class="ui">🐕 机器人播报状态</span>可查看机器人端的声卡、队列与音量，<span class="ui">⏹ 打断</span>清空播报队列。</p>
+
+<!-- ───────────── 8 ───────────── -->
+<h1><span class="num">8</span>做一次完整巡检</h1>
+<p>以下步骤在仿真模式与真机模式下完全一样。建议先在仿真里练熟。</p>
+<h2>8.1 同步地图（每张地图一次；重新建图后要重做）</h2>
+<p>左侧<span class="ui">地图与导航航点</span> → 选择地图 → <span class="ui">同步</span>。画布上会显示导航航点、连通关系与机器人的实时位置。检查两个数字：航点数是否正确；<b>连通块是否为 1</b>（大于 1 说明地图拓扑断开，跨块的路段会走不通）。</p>
+<p class="small">在画布上点某个导航航点，可以直接「添加为任务航点」「设为定位初值」或「设为路线起点 / 终点」。</p>
+
+<h2>8.2 定义任务航点（巡检点）</h2>
+<p>左侧<span class="ui">任务航点</span> → <span class="ui">＋ 新建任务航点</span>（或在地图上点导航航点 →「添加为任务航点」）。编辑器右半边的<b>全景角度编辑器</b>是核心操作：</p>
+<ol class="steps">
+  <li>点<span class="ui">📷 抓一张作参考图</span>（或上传一张）。建议先让机器人真的走到这个点再抓，看到的就是它到点后的视野。</li>
+  <li>在图上拖动<b>两条黄线</b>圈出要检查的方位范围：最左 0°、中间 180°、最右 360°；起点大于终点（如 330°→30°）表示跨越左右接缝，系统会自动拼接。</li>
+  <li>写<b>检查问题（prompt）</b>：必须是能用「是 / 不是」回答的具体问题，例如「画面中间的红色消防栓柜门是否关好？」「地面黄色方格区域内是否有物品堆放？」。</li>
+  <li>填<b>答案模版</b>：选择回答「是」还是「不是」算通过（例如「门是否关好」期望「是」，「通道是否被占用」期望「不是」）；再写通过 / 不通过 / 无法判断三句播报，可用 <code>{name}</code>（航点名）、<code>{answer}</code>（模型回答）占位，每句后面的 ▶ 可以试听。</li>
+  <li>点<span class="ui">保存</span>后，在编辑器右下的「<b>试问 VLM</b>」里点<span class="ui">用参考图</span>（或<span class="ui">现抓一张</span>）：立即看到裁切图、模型原始回复、判读结果和将要播报的那句话。不满意就改问题或收窄角度，反复试，<b>这一步不会让机器人动</b>。</li>
+</ol>
+<figure><img src="../screenshots/04-waypoint-editor.jpg"><figcaption>图 8-1　任务航点编辑器：左侧填写问题与答案模版，右侧拖动黄线划定角度范围</figcaption></figure>
+
+<h2>8.3 建任务</h2>
+<p>左侧<span class="ui">任务规划</span> → <span class="ui">＋ 新建任务</span>：选择<b>地图</b>、<b>起始点</b>，按顺序加入任务航点（上下箭头调整顺序）。</p>
+<ul>
+  <li><b>起始点</b>选「自动」= 执行时按机器人当前位置取最近的航点；指定具体航点则每次都从它出发（适合总从充电位或门口出发）。</li>
+  <li><b>执行选项</b>都有默认值，不确定就别改。常用的几项：到点稳定（默认 2 秒，机器人到点后还在晃就加大）、每段超时（默认 600 秒）、结束后返回起点（默认关）、执行前要求定位就绪（默认开，<b>真机务必保持开</b>）。</li>
+  <li>点<span class="ui">路线</span>预览各段路径与总长，走不通的段会标红。</li>
+</ul>
+<figure><img src="../screenshots/05b-task-editor.jpg"><figcaption>图 8-2　任务编辑：地图、起始点、任务航点顺序与执行选项</figcaption></figure>
+
+<h2>8.4 执行与看护</h2>
+<p>点<span class="ui">▶ 执行</span>：系统先做一次前置检查（不通过会直接列出原因），真机模式还会再确认一次。之后在<span class="ui">执行监控</span>里查看：</p>
+<ul>
+  <li><b>分段进度</b>：每段依次显示 已下发 → 导航中 → 已到达 → 检查中 → 完成。</li>
+  <li><b>检查结果</b>：带角度标注的全景、裁切图、模型回复、判读结论与播报文本（可重放）。每条结果可以<b>人工复核</b>（判通过 / 判不通过 / 撤销），统计按复核后的结果计算。</li>
+  <li><b>事件时间线</b>：云端与系统事件合在一起，可导出 CSV。</li>
+</ul>
+<figure><img src="../screenshots/06-run-completed.jpg"><figcaption>图 8-3　执行监控：一趟完成的巡检，含分段进度与每个检查点的结果</figcaption></figure>
+<table>
+  <tr><th style="width:22%">人工干预按钮</th><th>作用</th></tr>
+  <tr><td>⏸ 暂停</td><td>当前段走完后停下；点「▶ 继续」接着走</td></tr>
+  <tr><td>⏭ 跳过当前航点</td><td>停掉这一段，从当前位置重新规划下一段</td></tr>
+  <tr><td>■ 中止</td><td>停止任务，并把本次执行标记为已中止</td></tr>
+</table>
+<p>执行失败或中止后，执行详情右上角会出现「↻ 从『某航点』重跑剩余航点」，只走没做完的部分。</p>
+<div class="box bad"><b class="t">顶栏「⚠ 急停」不是硬件急停</b>它让机器人端持续下发停止指令，现场遥控仍可能与它竞争，而且机器人收到后还会滑行 5–7 秒才停住。要确保机器人绝对不动，请按机器人身上的<b>物理急停按钮</b>。</div>
+
+<h2>8.5 定时执行</h2>
+<p><span class="ui">任务规划 → ⏰ 定时</span>：可设「每天固定时刻」（如 <code>07:30,19:30</code>）或「每 N 分钟」。到点时如已有执行在跑，会跳过并记一条事件；执行前照常做前置检查。<b>定时计划只在程序运行时生效</b>（窗口收进托盘也算运行），建议配合「开机自启」使用（§9.3）。</p>
+
+<!-- ───────────── 9 ───────────── -->
+<h1><span class="num">9</span>日常使用</h1>
+<h2>9.1 托盘菜单</h2>
+<div class="two">
+  <figure style="flex:0 0 36%"><img style="max-width:100%" src="img/tray-menu.png"><figcaption>图 9-1　托盘菜单（右键托盘图标）</figcaption></figure>
+  <table>
+    <tr><th style="width:38%">菜单项</th><th>作用</th></tr>
+    <tr><td>打开页面</td><td>打开主窗口</td></tr>
+    <tr><td>打开设置</td><td>打开窗口并直接进入设置页</td></tr>
+    <tr><td>当前：…模式</td><td>只显示当前是仿真还是真机</td></tr>
+    <tr><td>仿真模式</td><td>勾选 / 取消，在仿真与真机之间切换（约 5 秒）。若有巡检正在执行，会先询问是否中止</td></tr>
+    <tr><td>状态…</td><td>显示模式、云端、版本、端口、后台线程、运行环境与数据目录</td></tr>
+    <tr><td>打开数据目录</td><td>用资源管理器打开当前模式的数据目录</td></tr>
+    <tr><td>打开日志目录</td><td>出问题时把这里的日志发给技术支持</td></tr>
+    <tr><td>开机自启</td><td>勾选后登录 Windows 时自动启动</td></tr>
+    <tr><td>检查更新…</td><td>手动检查新版本（§10.1）</td></tr>
+    <tr><td>退出（会先停下机器人）</td><td>彻底退出（§9.2）</td></tr>
+  </table>
+</div>
+
+<h2>9.2 退出程序</h2>
+<p>右键托盘图标 → <span class="ui">退出（会先停下机器人）</span>：</p>
+<ul>
+  <li>没有巡检在执行：程序在几秒内退出。</li>
+  <li>有巡检正在执行：先弹出确认框。点<span class="ui">中止并退出</span>，系统会中止本次执行、让机器人停下，再退出（实测约 2 秒；最长等 40 秒）。点<span class="ui">取消</span>则什么都不做，巡检继续。</li>
+</ul>
+<figure><img class="third" src="img/quit-dialog.png"><figcaption>图 9-2　有巡检在执行时退出的确认框</figcaption></figure>
+<div class="box warn"><b class="t">不要用任务管理器强行结束</b>强行结束不会让机器人停下。确认框偶尔会被别的窗口挡住：把鼠标移到任务栏上的 PatrolScheduler 图标，在弹出的缩略图里点「退出」那一个即可。</div>
+
+<h2>9.3 开机自启</h2>
+<p>托盘菜单勾选<span class="ui">开机自启</span>后，每次登录 Windows 都会自动启动，并沿用上次的模式（仿真 / 真机）。需要定时巡检的电脑建议打开。取消勾选即关闭。</p>
+
+<h2>9.4 状态与自检</h2>
+<p>托盘<span class="ui">状态…</span>，或设置页下方的「<b>系统自检</b>」，可以看到版本、数据库、后台线程、媒体占用和「<b>运行环境</b>」。正常应显示：</p>
+<pre>Python 3.12.13 · 自带运行时 runtime · ffmpeg 有 · 中文字体 NotoSansCJKsc-Regular · win32</pre>
+<figure><img class="third" src="img/status-dialog.png"><figcaption>图 9-3　托盘「状态…」</figcaption></figure>
+
+<h2>9.5 数据、日志与备份</h2>
+<p>所有数据保存在 <code>%APPDATA%\PatrolScheduler\</code> 下（在资源管理器地址栏输入这串路径即可打开）：</p>
+<table>
+  <tr><th style="width:30%">位置</th><th>内容</th></tr>
+  <tr><td><code>data\</code></td><td>真机模式的数据库（<code>scheduler.db</code>）、巡检图片（<code>media\</code>）、后台日志（<code>logs\app.log</code>）</td></tr>
+  <tr><td><code>data-mock\</code></td><td>仿真模式的数据，结构同上</td></tr>
+  <tr><td><code>logs\</code></td><td>窗口与后台服务的启动日志：<code>desktop.log</code>、<code>backend.out</code>、<code>mock.out</code></td></tr>
+  <tr><td><code>desktop.json</code></td><td>记住上次是否为仿真模式</td></tr>
+</table>
+<ul>
+  <li><b>备份配置</b>：设置页 →「<b>备份 / 迁移</b>」→ 导出任务航点 / 任务 / 定时（JSON）。换电脑时在新电脑上「导入 JSON」即可。</li>
+  <li><b>完整备份</b>：先从托盘<b>退出程序</b>，再复制整个 <code>data</code> 文件夹（程序运行时直接复制数据库可能得到不完整的副本）。</li>
+  <li><b>磁盘占用</b>：桌面版目前不会自动清理旧图片。可在「系统自检 → 媒体占用」查看；空间紧张时，退出程序后删除 <code>data\media\runs\</code> 下较早的编号目录（只影响历史记录里那几次执行的图片显示）。</li>
+</ul>
+
+<!-- ───────────── 10 ───────────── -->
+<h1 class="cont"><span class="num">10</span>更新与卸载</h1>
+<h2>10.1 更新</h2>
+<ul>
+  <li>程序启动时会自动检查新版本；发现后在后台下载，下载完成会询问是否「现在重启安装」。若此时有巡检在执行，会先询问是否中止并停下机器人。</li>
+  <li>也可以随时从托盘点<span class="ui">检查更新…</span>。没有新版本时会提示「已是最新版本」；暂时没有发布渠道时会提示「检查更新失败」，不影响使用。</li>
+  <li>手动更新：直接运行新版本的安装包覆盖安装即可，数据与设置会保留。</li>
+</ul>
+<h2>10.2 卸载</h2>
+<ol class="steps">
+  <li>先从托盘<span class="ui">退出</span>程序。</li>
+  <li>Windows「设置 → 应用 → 已安装的应用」→ 找到 <b>PatrolScheduler 0.8.0</b> → 卸载（或控制面板 → 程序和功能）。</li>
+  <li>卸载会删除程序文件和开始菜单、桌面快捷方式，<b>但会保留</b> <code>%APPDATA%\PatrolScheduler\</code> 里的数据与设置，重新安装后数据仍在。要彻底清除，卸载后手动删除该文件夹。</li>
+</ol>
+
+<!-- ───────────── 11 ───────────── -->
+<h1 class="cont"><span class="num">11</span>安全须知（真机）</h1>
+<ol>
+  <li><b>急停不是硬件急停</b>，也不是锁：它让机器人端持续下发停止指令，现场遥控仍可能与之竞争，实测还有 5–7 秒滑行，而且不会取消云端任务。要确保绝对不动，请按物理急停按钮。</li>
+  <li><b>停任务 ≠ 停设备</b>：停任务只让机器人停下，导航等模块还在运行（耗电）。当天收工时再按「停止设备（收尾 ⑧）」。</li>
+  <li><b>定位初值必须是机器人真实所在的航点</b>，给错会导致巡检朝错误方向行走。</li>
+  <li>让机器人动起来之前，确认路径上没有人，并有人能随时按下物理急停。</li>
+  <li>同一时刻只有一方能控制机器人：现场人员可以抢走程序的控制权，程序不会反过来抢。看到「控制权被别人持有」时请等待，不要反复重试。</li>
+  <li>后台服务只监听本机（127.0.0.1），没有登录鉴权。请勿自行改成对局域网开放。</li>
+  <li>如果你的机器人别名接的是与真机共用 roscore 的仿真环境，<b>不要按「启动设备 / 停止设备」</b>。</li>
+</ol>
+
+<!-- ───────────── 12 ───────────── -->
+<h1><span class="num">12</span>常见问题</h1>
+<table>
+  <tr><th style="width:34%">现象</th><th>处理</th></tr>
+  <tr><td>安装时出现「Windows 已保护你的电脑」</td><td>点「更多信息」→「仍要运行」。安装包未签名所致</td></tr>
+  <tr><td>找不到托盘图标</td><td>点任务栏右下角的「^」（显示隐藏的图标）。可按 §4.1 让它常驻任务栏</td></tr>
+  <tr><td>点了「退出」好像没反应</td><td>有巡检在执行时会弹确认框，它可能被其他窗口挡住：鼠标移到任务栏上的 PatrolScheduler 图标，在缩略图里点「退出」</td></tr>
+  <tr><td>真机模式下左下角显示 MOCK、顶栏「云端不可达」</td><td>还没填写云端地址：按 §6.1 在<b>真机模式</b>下填写并保存。已经保存过但左下角还是 MOCK：从托盘退出再打开一次</td></tr>
+  <tr><td>顶栏「离线」</td><td>机器人没开机、没联网，或云端地址 / 别名 / 密钥填错</td></tr>
+  <tr><td>任务下发成功，但机器人不动</td><td>依次检查：是否漏了「② 启动设备」、是否漏了「④ 定位」、急停是否还在生效、路径是否属于另一张地图</td></tr>
+  <tr><td>前置检查：云端有任务在跑</td><td>路径为空 → 刚做过定位的残留，点「停任务」；有正常路径且不是你下发的 → 现场有人在操作，等它结束</td></tr>
+  <tr><td>操作返回 409 / 控制权被别人持有</td><td>现场有人在控制机器人，等对方放手</td></tr>
+  <tr><td>中止 / 停任务后机器人还在走</td><td>机器人端偶发不响应停止指令，系统会记一条红色事件。使用急停或到现场处理</td></tr>
+  <tr><td>抓不到全景或抓帧很慢</td><td>真机 RTSP 抓一帧约 3 秒。8554 端口被挡时把抓图源改为 <code>hls</code></td></tr>
+  <tr><td>全景是一条条竖条纹</td><td>抓到了还没稳定的画面，系统会自动重抓，仍不合格会跳过判读并记 <code>snapshot_degraded</code> 事件</td></tr>
+  <tr><td>全景上的中文是方块</td><td>看「运行环境」是否显示「中文字体 NotoSansCJKsc-Regular」；不是的话重新安装</td></tr>
+  <tr><td>电脑上听不到播报</td><td>确认汇出里有 <code>browser</code>、电脑没静音、顶栏「🔊 声音」已打开；<code>edge</code> 引擎需要联网</td></tr>
+  <tr><td>程序启动失败：「后端 60 秒没起来」</td><td>托盘或报错框里的日志目录，看 <code>backend.out</code>；常见原因是数据目录不可写或杀毒软件拦截</td></tr>
+  <tr><td>端口 8088 被占用</td><td>程序会自动换下一个端口，托盘「状态…」里可看到实际端口</td></tr>
+  <tr><td>杀毒软件删除了程序文件</td><td>把安装目录加入杀毒软件的排除项后重新安装</td></tr>
+  <tr><td>退出时卡了很久</td><td>后台在等机器人确认停下（最多 40 秒），通常是云端不响应。超时后程序会强制结束</td></tr>
+</table>
+<p><b>联系技术支持时请提供</b>：托盘「状态…」的截图，以及日志目录里的 <code>desktop.log</code>、<code>backend.out</code> 和数据目录里的 <code>logs\app.log</code>。</p>
+
+<!-- ───────────── 附录 A ───────────── -->
+<h1><span class="num">A</span>附录 A　设置项速查</h1>
+<table>
+  <tr><th style="width:22%">设置项</th><th style="width:20%">默认值</th><th>说明</th></tr>
+  <tr><td colspan="3"><b>云端连接</b></td></tr>
+  <tr><td>云端地址</td><td>（占位）</td><td>真机填管理员提供的地址，如 <code>https://certaintyx.sg:8443</code></td></tr>
+  <tr><td>机器人别名</td><td>（占位）</td><td>填别名，不要填机器人 ID</td></tr>
+  <tr><td>API 密钥</td><td>（占位）</td><td>只保存在本机，显示为掩码；不改就原样保存</td></tr>
+  <tr><td>本地限速 (rps)</td><td>4</td><td>云端限 5 次/秒，留余量，一般不用改</td></tr>
+  <tr><td colspan="3"><b>VLM 视觉判读</b></td></tr>
+  <tr><td>提供方</td><td>mock</td><td>mock / qwen / openai_compat / anthropic（§7.1）</td></tr>
+  <tr><td>模型</td><td>qwen2.5vl:7b</td><td>按提供方填写</td></tr>
+  <tr><td>超时 (s)</td><td>120</td><td>模型响应慢时可加大</td></tr>
+  <tr><td colspan="3"><b>TTS 播报</b></td></tr>
+  <tr><td>引擎</td><td>edge</td><td>edge / none / command（§7.2）</td></tr>
+  <tr><td>edge 声音</td><td>zh-CN-XiaoxiaoNeural</td><td>也可用 zh-CN-YunxiNeural 等</td></tr>
+  <tr><td>汇出</td><td>browser</td><td>真机推荐 <code>robot,browser</code></td></tr>
+  <tr><td>机器人音量</td><td>（空）</td><td>0–100；留空表示沿用机器人上次的音量</td></tr>
+  <tr><td>播完再继续</td><td>0</td><td>1 = 等机器人念完再走下一段</td></tr>
+  <tr><td colspan="3"><b>抓图与执行</b></td></tr>
+  <tr><td>抓图源</td><td>synthetic</td><td>真机改为 <code>rtsp</code>；8554 被挡用 <code>hls</code></td></tr>
+  <tr><td>常驻读流</td><td>1</td><td>到点抓帧更快更稳，保持开启</td></tr>
+  <tr><td>机头对应角度 (°)</td><td>180</td><td>通过「机头校准」设置（§6.4）</td></tr>
+  <tr><td>到点稳定 (s)</td><td>2</td><td>机器人到点后等待多久再抓图</td></tr>
+  <tr><td>每段超时 (s)</td><td>600</td><td>按最长一段实际用时的 2 倍设置</td></tr>
+  <tr><td>通知 Webhook</td><td>（空）</td><td>检查不通过或执行失败时把 JSON 推送到这个地址（如企业 IM 机器人）</td></tr>
+</table>
+
+<!-- ───────────── 附录 B ───────────── -->
+<h1><span class="num">B</span>附录 B　文件与目录位置</h1>
+<table>
+  <tr><th style="width:34%">内容</th><th>位置</th></tr>
+  <tr><td>程序文件</td><td><code>%LOCALAPPDATA%\Programs\PatrolScheduler\</code></td></tr>
+  <tr><td>数据与设置</td><td><code>%APPDATA%\PatrolScheduler\</code>（详见 §9.5）</td></tr>
+  <tr><td>真机数据库</td><td><code>%APPDATA%\PatrolScheduler\data\scheduler.db</code></td></tr>
+  <tr><td>仿真数据库</td><td><code>%APPDATA%\PatrolScheduler\data-mock\scheduler.db</code></td></tr>
+  <tr><td>巡检图片</td><td><code>…\data\media\runs\&lt;执行编号&gt;\</code></td></tr>
+  <tr><td>启动日志</td><td><code>%APPDATA%\PatrolScheduler\logs\</code></td></tr>
+  <tr><td>后台运行日志</td><td><code>…\data\logs\app.log</code>（仿真为 <code>data-mock\logs\app.log</code>）</td></tr>
+  <tr><td>开机自启登记</td><td>注册表 <code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code> 下的 <code>cn.patrolscheduler.desktop</code></td></tr>
+  <tr><td>网页地址</td><td>默认 <code>http://127.0.0.1:8088</code>（被占用时自动顺延，见托盘「状态…」）。同一台电脑上用浏览器打开也能操作</td></tr>
+</table>
+<h2>一键灌入演示数据（仿真模式，可选）</h2>
+<p>在仿真模式运行时，打开 PowerShell 执行下面两行，会同步演示地图、建 3 个任务航点和 1 个任务，并跑一趟（约 40 秒）：</p>
+<pre>$R = "$env:LOCALAPPDATA\Programs\PatrolScheduler\resources"
+&amp; (Get-ChildItem "$R\runtime\python\*\python.exe" | Select-Object -First 1).FullName "$R\backend\scripts\seed_demo.py" --base http://127.0.0.1:8088 --reset --init --run --mock-speed 6</pre>
+<p class="small">若端口不是 8088，把 <code>--base</code> 里的端口换成托盘「状态…」里显示的端口。</p>
+
+<!-- ───────────── 附录 C ───────────── -->
+<h1><span class="num">C</span>附录 C　macOS 与 Linux</h1>
+<p>三个平台的安装包里是同一份运行时与程序，界面与操作完全相同，只有安装方式和数据位置不同：</p>
+<table>
+  <tr><th style="width:14%">平台</th><th>安装</th><th style="width:36%">数据与日志</th></tr>
+  <tr><td>macOS</td><td>打开 <code>PatrolScheduler-x.y.z-mac-arm64.dmg</code>（Apple 芯片）或 <code>-mac-x64.dmg</code>（Intel），把图标拖进「应用程序」。未签名的包第一次打开会被拦：系统设置 → 隐私与安全性 → 仍要打开</td><td><code>~/Library/Application Support/PatrolScheduler/</code></td></tr>
+  <tr><td>Linux</td><td>给 <code>PatrolScheduler-x.y.z-linux-x64.AppImage</code> 加可执行权限后双击；或安装 deb 包。AppImage 双击没反应时安装 <code>libfuse2</code></td><td><code>~/.config/PatrolScheduler/</code></td></tr>
+</table>
+<p class="small">— 完 —</p>
+
+</body>
+</html>

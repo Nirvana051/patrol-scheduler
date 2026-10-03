@@ -52,12 +52,14 @@ python scripts\build_runtime.py --dev --prune
 然后用 **runtime 里的解释器**跑全量用例（路径以 `runtime\manifest.json` 里的 `python.exe` 为准，一般就是下面这个）：
 
 ```powershell
-$py = Join-Path (Get-Location) ((Get-Content runtime\manifest.json | ConvertFrom-Json).python.exe -replace '/', '\')
-& $py -m pytest -q -p no:cacheprovider
+$py = Join-Path (Resolve-Path runtime) ((Get-Content runtime\manifest.json | ConvertFrom-Json).python.exe -replace '/', '\')
+& $py -m pytest
 ```
 
+（`manifest.json` 里的 `python.exe` 是相对 `runtime\` 的路径；`-q -p no:cacheprovider` 已在 `pytest.ini` 的 addopts 里，再加一个 `-q` 会连结尾的汇总行都不打。）
+
 期望：**176 用例**全部通过，约 4 到 6 分钟。会有一条用例因为「需要 ffmpeg」而跳过是不对的，Windows 上 runtime 里有 ffmpeg，它应该跑；
-`tests/test_build_runtime.py` 里的符号链接那一条在 Windows 上跳过是对的。
+`tests/test_build_runtime.py` 里的符号链接那一段在 Windows 上不执行（用例本身照常通过，不显示为跳过）。
 
 把结尾的汇总行记下来。有失败就把整条 `FAILED` 与它上面的回溯复制下来。
 
@@ -131,6 +133,8 @@ python scripts\build_desktop.py --target "nsis zip"
 | 托盘「退出」后 python.exe 残留 | 记下来，这是最重要的一类问题（退出应走 `/api/shutdown` 优雅停止）。顺手看 `%APPDATA%\PatrolScheduler\logs\desktop.log` 最后几行 |
 | 端口 8088 被占 | 壳会自动换下一个端口，看托盘「状态…」 |
 | 杀毒软件删了 `runtime\ffmpeg\ffmpeg.exe` 或 electron | 加排除项后重新 `python scripts\build_runtime.py` |
+| 页面上的全景 / 检查图片全裂（`/media/...` 404），但文件明明在数据目录里；或卸载后开始菜单、桌面的快捷方式还在、控制面板里没有卸载项 | 安装包或程序是从 **MSIX 打包的应用**（如 Claude 桌面版）里开的终端起的：那里有文件系统 / 注册表虚拟化，写 `%APPDATA%` 与 HKCU 会被重定向到 `%LOCALAPPDATA%\Packages\<应用>\LocalCache\`。用资源管理器双击安装包与快捷方式就正常 —— 不是产品问题 |
+| 用例汇总行没打出来 | `pytest.ini` 里已有 `-q`，命令行再加 `-q` 就成了 `-qq`。直接 `-m pytest` |
 
 ## 8. 记什么、怎么交回来
 

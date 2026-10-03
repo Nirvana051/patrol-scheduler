@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           PY=$(python -c "import json;print(json.load(open('runtime/manifest.json'))['python']['exe'])")
-          env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 "runtime/$PY" -m pytest -q -p no:cacheprovider
+          env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 "runtime/$PY" -m pytest          # -q 已在 pytest.ini；再加一个连汇总行都不打
 
       - name: Linux 桌面壳需要的系统库与虚拟显示
         if: runner.os == 'Linux'
