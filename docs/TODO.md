@@ -92,6 +92,13 @@ Electron 只做壳（拉起后端、窗口、托盘、优雅退出、仿真模�
 5. **已修（2026-10-03 晚）保存云端设置后左下角模式标识不刷新**：现在 `setStatus()` 每收到一次状态快照就核对 `mode`，变了就重画（实测改 `CX_HOST` 后 1–3 s 自动变，两个方向都对）。原问题：`web/js/app.js` 的 `renderMode()` 只在 SSE `hello` 时跑一次，存了 `CX_HOST` 后后端已是 real，
    左下角仍显示 MOCK · 仿真；桌面壳去掉了菜单，没有 F5，用户只能重启程序（托盘「打开设置」只改 hash，不重新加载）。
    做法：`PUT /api/settings` 重连后往总线发一条 `mode` 事件让前端 `renderMode()`，或设置页保存成功后 `location.reload()`。
+6. **`--smoke` 不隔离用户数据目录（v0.8.1 发布后发现，未修）**：自检用的 userData 就是已安装程序的 `%APPDATA%\PatrolScheduler`，
+   数据目录 `data-mock` 与正在运行的那份共用。用户若在「仿真模式」下的设置页填了真机云端（settings 表优先于壳传的 mock 环境变量），
+   自检拉起的「仿真」后台就会连**真实云端**（实测 2026-10-03 22:57：`real 模式，https://certaintyx.sg:8443，机器人 dog-01`；
+   只读，读状态 + 抓帧，没有控制指令），抓帧 30 s 没回来 → `This operation was aborted` → 打包失败；同时与运行中的程序抢同一个库和 Chromium 缓存。
+   CI 每次是全新环境，不受影响。做法：`--smoke` 时在 ready 之前 `app.setPath('userData', <临时目录>)`，结束后删掉。
+   附带暴露的是第 1 条的另一面：**仿真模式的 settings 表里一旦有 `CX_*`，仿真就不再是仿真**（T27 的残留）——
+   壳在仿真模式下应让后端忽略 settings 表里的 `CX_*`（或设置页在仿真模式下禁改这几项）。
 
 已知残留差异（不影响巡检主流程）：Windows 没有 uvloop，用标准 asyncio；Linux 桌面上浏览器朗读兜底可能无声（主路径是 edge 合成的 mp3）；edge-tts 三平台都要联网；桌面版不带 ffplay，`local` 汇出只在 PATH 里有 ffplay 时可用（窗口本身就是本机扬声器）。
 
