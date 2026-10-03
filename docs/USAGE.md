@@ -86,6 +86,17 @@ CRLF，`./start.sh` 会报 `/usr/bin/env: ‘bash\r’`。仓库里的 `.gitattr
 
 ---
 
+### 1.x 桌面版（Windows / macOS / Linux，不用装 Python）
+
+现场电脑用**桌面版**：安装包里自带 Python 3.12、全部依赖、ffmpeg 与中文字体，和这台 Ubuntu 开发机跑的是同一份
+（见 [DESKTOP.md](DESKTOP.md)）。Windows 跑 `PatrolScheduler-x.y.z-win-x64.exe`，macOS 打开 dmg 拖进「应用程序」，
+Linux 给 AppImage 加可执行权限后双击。第一次启动自动进「设置」页填云端地址、机器人别名与密钥，**不用再碰 .env**；
+想先看效果就在托盘菜单勾「仿真模式」。关窗口只是收进托盘，**要彻底退出用托盘菜单的「退出」**（它会先把机器人停下）。
+安装包从 GitHub Releases 下载；也可以自己出包：`python3 scripts/build_runtime.py` 再 `python3 scripts/build_desktop.py`。
+
+开发机的 `.venv` 现在也是 Python 3.12（`bootstrap.sh` 有 uv 时会自动下载与桌面版 runtime 同一份解释器）；
+`make runtime` + `make runtime-test` 可以在本机用桌面版的运行时跑全量用例。
+
 ## 2. 五分钟先在仿真里跑一遍
 
 不需要机器人、不需要密钥、不会让任何东西动：
@@ -407,6 +418,9 @@ FROM inspections WHERE frame_score IS NOT NULL AND frame_score < 1.0 ORDER BY id
 看「总览 → ROS」。为「不可用」时机器人端 ROS 挂了，接口照常返回但内容是最后一次成功读到的陈旧值。
 
 ---
+
+**桌面版的问题**（壳起不来、找不到运行时、AppImage 要 FUSE、macOS / Windows 对未签名包的拦截、退出卡 40 秒等）
+集中在 [DESKTOP.md](DESKTOP.md) §6 的排障表里。
 
 ## 8. 界面一览
 

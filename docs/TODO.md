@@ -1,5 +1,33 @@
 # 问题与 TODO（与 ../../Sample_web_api/docs/task.md §9 同步）
 
+## 0 进行中：跨平台桌面版（2026-10-01 起，方案见 DESKTOP.md）
+
+优先级：用户体验 > 开发时间 > 安装包体积；目标是 Windows / macOS / Linux 上尽可能复现 Ubuntu 开发环境里的表现。
+做法：**后端只保留 Python**，应用自带完整运行时（固定版本 Python 3.12 + 锁定依赖 + ffmpeg + Noto CJK 字体），
+Electron 只做壳（拉起后端、窗口、托盘、优雅退出、仿真模式、自动更新），不含业务逻辑。开发顺序：先开发、后测试。
+
+| # | 步骤 | 内容 | 状态 |
+|---|------|------|------|
+| D1 | 后端可移植修补 | `app/platform.py`（ffmpeg / 字体 / 子进程参数统一入口，优先用 runtime 里的）；`pano.py` 字体改走它；`POST /api/shutdown`（只绑本机、启动口令）；`.env` 读取 utf-8-sig；`PS_ENV_FILE` 可指定；6 处相对路径拼 URL 改 `as_posix`；`requirements.lock` 里 uvloop 排除 Windows；`soak.py` 的 /proc 采样非 Linux 跳过；`TTS_COMMAND` 在 Windows 用非 POSIX 切分 | **已做**（`tests/test_platform.py` 12 条；SSE 生成器顺带改成异步，见 DEVLOG） |
+| D2 | runtime 组装脚本 | `scripts/build_runtime.py`：用 uv 装固定版本 python-build-standalone，按锁装依赖，下载本平台 ffmpeg 静态二进制与 Noto Sans CJK，写 `runtime/manifest.json`；来源与哈希钉在 `runtime.lock.json`；Linux 上先跑通并让全量用例对着 runtime 的解释器全绿 | **已做**（Linux runtime 411 MB，自检通过；ffmpeg 来源最终用 PyPI `imageio-ffmpeg` 轮子） |
+| D3 | Python 统一 3.12 | `bootstrap.sh` 优先用 uv 建 3.12 的 `.venv`（3.10 本月停止维护）；重建 `.venv` 后全量用例 | **已做**：`bootstrap.sh` 优先 3.12（uv 自动下载）；本机 `.venv` 已重建为 3.12.13，全量用例通过；老环境在 `.venv.old` |
+| D4 | Electron 壳 | `desktop/`：main.js 拉起后端、等健康检查、窗口、托盘菜单（打开页面 / 仿真模式 / 状态 / 数据目录 / 开机自启 / 检查更新 / 退出）、退出前确认并走 shutdown 接口、崩溃拉起、单实例、端口自选、`--smoke` 自检模式 | **已做**：开发态 `--smoke` 通过（起 2.2 s / 停 0.4 s）；`--screenshot` 截到真实窗口（docs/screenshots/10、11）；托盘菜单的各项在本机没人工点过 |
+| D5 | 打包与 CI | electron-builder（Windows NSIS + zip，macOS dmg + zip，Linux AppImage + deb；runtime 与后端代码作为 extraResources）；GitHub Actions 三平台矩阵：组装 runtime → 全量用例 → 打包 → 产物；打 tag 发 Release 与更新元数据 | **已写**：本机出了 Linux AppImage（260 MB，含 runtime 预编译 pyc）并用 `--smoke` 验过打包后的布局；工作流**未推送、未在 GitHub 上跑过**；子代理只读审查抓到的 4 条确认问题（Windows 编码、mac 更新通道、mock 泄漏、退出重入）已修 |
+| D6 | 文档与记账 | `docs/DESKTOP.md`（架构、构建、发布、排障）；USAGE §1 桌面版；deploy/README 三平台；HANDOFF / task.md §12 改写决策；CHANGELOG 0.8.0；DEVLOG | **已做**（`make docs-check` 通过为准） |
+| D7 | 测试（开发完成后） | Ubuntu 全量用例（.venv 3.12 与 runtime 各一遍）；Electron `--smoke`；本地出一个 AppImage 装上跑仿真；CI 三平台全绿；用户在 Windows / mac 上真机冒烟 | **部分**：Ubuntu 全量用例 `.venv`(3.12) 与 runtime(3.12) 各一遍、`--smoke` 开发态与 AppImage 各一次已过；**CI 与 Windows / mac 未跑**（下一步：推送后看 Actions 四个作业） |
+| D8 | 用户侧事项 | 签名（Apple Developer；Windows 证书或 Azure Trusted Signing）；一台 Windows 与一台 mac 做冒烟；GitHub Releases 作为更新渠道 | 等用户 |
+
+**下一步（按顺序）**：① 提交并推送本次改动，看 Actions 四个作业（第一次跑大概率要修 Windows / mac 的小问题，比如 PBS 的 Windows 布局、
+`npm ci` 的缓存键、xvfb 下的 AppImage）；② 用户在 Windows 与 mac 上装包做人工与真机冒烟（TEST_PLAN 附表）；③ 签名接上后出正式 Release。
+
+**桌面版带出来的新问题（未做）**：
+- **桌面版没有 cron**：媒体清理（`scripts/cleanup_media.py`）与数据库备份（`scripts/backup_db.py`）在 Linux 上靠 cron（deploy/README §2），
+  装了桌面版的 Windows / mac 没有这一环，`data/media` 会无限增长（T14 的桌面版形态）。做法：进程内定时（`ScheduleRunner` 每天一次）+
+  设置项「媒体保留天数」，默认 30 天；备份同理。
+- **托盘菜单与自动更新只在 Ubuntu 上看过壳的日志，没在 Windows / mac 上点过**：第一次 CI 产包后要人工过一遍 DESKTOP.md §2 的每一项。
+
+已知残留差异（不影响巡检主流程）：Windows 没有 uvloop，用标准 asyncio；Linux 桌面上浏览器朗读兜底可能无声（主路径是 edge 合成的 mp3）；edge-tts 三平台都要联网；桌面版不带 ffplay，`local` 汇出只在 PATH 里有 ffplay 时可用（窗口本身就是本机扬声器）。
+
 
 ## 1 必须在真机上才能关闭的
 | # | 问题 | 影响 | 处置 / 状态 |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 在一台新机器上把 Python 环境准备好（Ubuntu / macOS）。
-#   ./bootstrap.sh              建 .venv（隔离）+ 按 requirements.lock 装依赖 + 自检
+#   ./bootstrap.sh              建 .venv（隔离，Python 3.12）+ 按 requirements.lock 装依赖 + 自检
 #   ./bootstrap.sh --dev        额外装 pytest / ruff（跑用例与语法检查要用）
 #   ./bootstrap.sh --recreate   已有 .venv 也重建（旧的挪到 .venv.old）
 #
@@ -24,15 +24,17 @@ say() { printf '%s\n' "$*"; }
 ok()  { printf '  ✅ %s\n' "$*"; }
 bad() { printf '  ❌ %s\n' "$*"; }
 
-# ── ① 找一个 3.10+ 的解释器 ──────────────────────────────────────────────
+# ── ① 找解释器：优先 3.12（与桌面版 runtime 同版本，见 runtime.lock.json；3.10 已于 2026-10 停止维护）──
+# 有 uv 时不依赖系统装没装 3.12：uv 会下载同一份 python-build-standalone，和 runtime/ 里的一模一样。
+WANT_PY="$(python3 -c 'import json;print(json.load(open("runtime.lock.json"))["python"]["version"])' 2>/dev/null || echo 3.12)"
 PYBIN=""
-for c in "${PS_PYTHON_BASE:-}" python3.13 python3.12 python3.11 python3.10 python3; do
+for c in "${PS_PYTHON_BASE:-}" python3.12 python3.13 python3.11 python3.10 python3; do
   [ -n "$c" ] || continue
   command -v "$c" >/dev/null 2>&1 || continue
   if "$c" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then PYBIN="$c"; break; fi
 done
 [ -n "$PYBIN" ] || { bad "找不到 Python 3.10+。Ubuntu: sudo apt install python3.10 python3.10-venv"; exit 1; }
-ok "解释器 $PYBIN（$("$PYBIN" --version 2>&1)）"
+ok "解释器 $PYBIN（$("$PYBIN" --version 2>&1)）；目标版本 $WANT_PY"
 
 # ── ② 建隔离 venv ────────────────────────────────────────────────────────
 if [ -d .venv ] && [ "$RECREATE" = 0 ]; then
@@ -41,7 +43,8 @@ else
   [ -d .venv ] && { rm -rf .venv.old; mv .venv .venv.old; ok "旧 .venv 挪到 .venv.old"; }
   UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
   if [ -x "$UV" ]; then
-    "$UV" venv .venv --python "$PYBIN" --seed >/dev/null
+    # 指定版本号而不是 $PYBIN：uv 没有就自己下载 python-build-standalone ${WANT_PY}，三平台 / runtime 同一份
+    "$UV" venv .venv --python "$WANT_PY" --seed >/dev/null || "$UV" venv .venv --python "$PYBIN" --seed >/dev/null
     ok "用 uv 建好 .venv（自带 pip）"
   elif "$PYBIN" -c 'import ensurepip' 2>/dev/null; then
     "$PYBIN" -m venv .venv
@@ -61,7 +64,7 @@ if grep -q 'include-system-site-packages *= *true' .venv/pyvenv.cfg 2>/dev/null;
   bad ".venv 继承了系统站点包（ROS/CUDA 会漏进来）。用 ./bootstrap.sh --recreate 重建"
   exit 1
 fi
-ok "venv 是隔离的（include-system-site-packages = false）"
+ok "venv 是隔离的（include-system-site-packages = false）；Python $("$PY" -c 'import sys;print(".".join(map(str,sys.version_info[:3])))')"
 
 # ── ③ 装依赖：有 lock 就按 lock（可复现），否则按 requirements.txt ─────────
 PIPQ="-q --disable-pip-version-check"

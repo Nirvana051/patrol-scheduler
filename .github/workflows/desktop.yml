@@ -1,0 +1,94 @@
+# 桌面版三平台流水线：组装 runtime → 用 runtime 的解释器跑全量用例 → 桌面壳自检 → electron-builder 打包 → 产物。
+# 打 v* 标签时额外发布到 GitHub Releases（electron-updater 的更新元数据 latest*.yml 一起传）。
+# 签名：有对应 secrets 就签（CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID），
+# 没有就出未签名包（Windows 装时 SmartScreen 会拦一次、macOS 要在「隐私与安全性」里放行；见 docs/DESKTOP.md）。
+name: desktop
+
+on:
+  push:
+    branches: [main, V1, muti-plat]
+    tags: ['v*']
+    paths-ignore: ['docs/**', '*.md']
+  pull_request:
+    paths-ignore: ['docs/**', '*.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: '1'          # Windows runner 的 stdout 默认 cp1252，脚本打印中文会炸
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64,    os: ubuntu-22.04,  target: AppImage }
+          - { name: win-x64,      os: windows-2022,  target: nsis }
+          - { name: mac-arm64,    os: macos-14,        target: 'dmg zip' }   # 自动更新要求 latest-*-mac.yml 里有 zip
+          - { name: mac-x64,      os: macos-15-intel,  target: 'dmg zip' }   # macos-13 runner 已下线（2025-12）
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }          # 只用来跑 scripts/*.py；后端用的是 runtime/ 里自带的解释器
+
+      - uses: astral-sh/setup-uv@v5
+        with: { version: '0.11.28' }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: desktop/package-lock.json }
+
+      - name: 缓存 runtime 下载（Python / ffmpeg 轮子 / 字体）
+        uses: actions/cache@v4
+        with:
+          path: runtime.cache
+          key: runtime-cache-${{ matrix.name }}-${{ hashFiles('runtime.lock.json', 'requirements.lock') }}
+
+      - name: 组装 runtime
+        run: python scripts/build_runtime.py --dev --prune
+
+      - name: 用 runtime 的解释器跑全量用例
+        shell: bash
+        run: |
+          PY=$(python -c "import json;print(json.load(open('runtime/manifest.json'))['python']['exe'])")
+          env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 "runtime/$PY" -m pytest -q -p no:cacheprovider
+
+      - name: Linux 桌面壳需要的系统库与虚拟显示
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb libgtk-3-0 libnss3 libasound2 libxss1 libgbm1 fuse libfuse2
+
+      - name: 桌面壳自检 + 打包（Linux，xvfb）
+        if: runner.os == 'Linux'
+        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+        run: xvfb-run -a python scripts/build_desktop.py --target "${{ matrix.target }}" ${{ startsWith(github.ref, 'refs/tags/v') && '--publish' || '' }}
+
+      - name: 桌面壳自检 + 打包（Windows / macOS）
+        if: runner.os != 'Linux'
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          CSC_LINK: '${{ secrets.CSC_LINK }}'
+          CSC_KEY_PASSWORD: '${{ secrets.CSC_KEY_PASSWORD }}'
+          APPLE_ID: '${{ secrets.APPLE_ID }}'
+          APPLE_APP_SPECIFIC_PASSWORD: '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}'
+          APPLE_TEAM_ID: '${{ secrets.APPLE_TEAM_ID }}'
+        run: python scripts/build_desktop.py --target "${{ matrix.target }}" ${{ startsWith(github.ref, 'refs/tags/v') && '--publish' || '' }}
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatrolScheduler-${{ matrix.name }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/latest*.yml
+          if-no-files-found: error

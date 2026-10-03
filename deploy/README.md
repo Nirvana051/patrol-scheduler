@@ -60,3 +60,17 @@ sudo systemctl daemon-reload && sudo systemctl enable --now patrol-scheduler
 `patrol-audio.service`：把 `audio_server/` 拷到有喇叭的机器上常驻。
 只需 python3 + 一个能出声的播放器（ffplay / mpg123 / aplay 之一），**不需要联网、不需要装 TTS**——
 调度系统这边合成好 mp3 直接推过去。`--token` 必须改掉（默认值是占位符）。
+
+## 5. 桌面版（Windows / macOS / Linux 现场电脑）
+
+不想在现场装 Python、ffmpeg、字体，就用桌面版：安装包自带固定版本的运行时（和开发机同一份），Electron 只做壳，
+退出时会先停机器人，自动更新接 GitHub Releases。全部细节在 `docs/DESKTOP.md`。
+
+```bash
+python3 scripts/build_runtime.py        # 组装 runtime/（约 400 MB）
+python3 scripts/build_desktop.py        # 出本平台的安装包到 desktop/dist/
+```
+
+三平台的包由 `.github/workflows/desktop.yml` 在 CI 上出；打 `v*` 标签就发布到 Releases。
+Windows 上想常驻：托盘菜单勾「开机自启」即可（它是按用户登录启动的；要做成不登录也跑的服务，仍用 §1 的 systemd 方式在 Linux 上部署）。
+

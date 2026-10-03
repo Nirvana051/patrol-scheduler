@@ -102,7 +102,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         row['frame_score'] = qc.get('detail')
         row['frame_attempts'] = qc.get('attempts')
         p_full = save_jpeg(data, run_dir, f'{stem}_pano')
-        row['image_path'] = str(p_full.relative_to(ctx.media_dir))
+        row['image_path'] = p_full.relative_to(ctx.media_dir).as_posix()
         img = Image.open(io.BytesIO(data)).convert('RGB')
         if qc and not qc.get('ok'):
             # 重抓过 attempts 次仍不合格：图留下来给人看，但**不拿它去问模型** ——
@@ -129,7 +129,7 @@ def run_inspection(ctx, run_id: int, leg: dict, tw: dict, *, pad_deg: float = 5.
         crop = pano.crop_angle_range(img, af, at, pad_deg=pad_deg)
         crop_bytes = pano.to_jpeg(crop)
         p_crop = save_jpeg(crop_bytes, run_dir, f'{stem}_crop')
-        row['crop_path'] = str(p_crop.relative_to(ctx.media_dir))
+        row['crop_path'] = p_crop.relative_to(ctx.media_dir).as_posix()
         annotated = pano.annotate(img, af, at, forward_deg=forward, label=name)
         annotated_bytes = pano.to_jpeg(annotated, 80)
         save_jpeg(annotated_bytes, run_dir, f'{stem}_annot')

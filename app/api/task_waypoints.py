@@ -121,7 +121,7 @@ def delete_tw(tw_id: int, request: Request):
 # ── 参考图 ───────────────────────────────────────────────────────────────────
 def _save_reference(c, tw: dict, data: bytes) -> dict:
     p = save_jpeg(data, c.media_dir / 'refs', f"tw{tw['id']}_{time.strftime('%Y%m%d_%H%M%S')}")
-    rel = str(p.relative_to(c.media_dir))
+    rel = p.relative_to(c.media_dir).as_posix()
     c.db.execute('UPDATE task_waypoints SET reference_image=?, updated_at=? WHERE id=?', (rel, now_iso(), tw['id']))
     img = Image.open(p)
     return {'reference_image': rel, 'url': f'/media/{rel}', 'width': img.width, 'height': img.height}
@@ -186,7 +186,7 @@ def test_vlm(tw_id: int, body: TestVlmIn, request: Request):
     user = build_user_prompt(prompt, af, at, forward_deg=forward, waypoint_name=tw['name'])
     res = c.vlm.ask_yes_no(images, user, system=SYSTEM_PROMPT)
     text, passed = pick_tts(tw.get('answer_template') or {}, res.answer, tw['name'])
-    return {'vlm': res.to_dict(), 'crop_url': f'/media/{p_crop.relative_to(c.media_dir)}', 'prompt_sent': user,
+    return {'vlm': res.to_dict(), 'crop_url': f'/media/{p_crop.relative_to(c.media_dir).as_posix()}', 'prompt_sent': user,
             'tts_text': text, 'passed': passed, 'angle_from': af, 'angle_to': at}
 
 

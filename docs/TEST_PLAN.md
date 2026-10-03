@@ -8,7 +8,7 @@
 ## 0. 前置（10 分钟）
 
 0. 换机器/首次：`./bootstrap.sh --dev`（建隔离 venv + 按 `requirements.lock` 装依赖 + 自检），
-   然后 `make test`（153 用例）与 `make docs-check` 都应全绿。**自检里那句「每个包都来自 venv 内部」
+   然后 `make test`（176 用例）与 `make docs-check` 都应全绿。**自检里那句「每个包都来自 venv 内部」
    必须是 ✅** —— 这台机器上 ROS 的 `PYTHONPATH` 会把 venv 里的包顶掉（见 HANDOFF §5.4 第 21 条）。
 1. `make smoke`：鉴权、在线、`/position` 200（仿真自带定位）、地图 ≥1 张且有航点、`/task` 有 `active/terminal`、SSE 可连、HLS 可取。
 2. 打开 http://127.0.0.1:8088 ，顶栏应为 **REAL**、在线 ●、定位就绪 ●、云端任务 IDLE。点「刷新状态」→ 前置检查全部 ✅。
@@ -102,3 +102,19 @@
 ## 每一步的证据在哪
 
 执行监控（段时间戳、检查卡片、本次事件、CSV 导出）；任务事件页（云端 + 系统统一时间线）；总览「近 30 天按航点统计」；`data/logs/app.log`；`/api/health` 系统自检。
+
+## 附：桌面版（v0.8.0）的验证清单
+
+目标是「三平台复现 Ubuntu 的表现」，所以验证分三层，每层都有明确的通过标准（详见 [DESKTOP.md](DESKTOP.md) §5）：
+
+| 层 | 怎么跑 | 通过标准 | 状态（2026-10-02） |
+|----|--------|----------|--------------------|
+| 后端 × 解释器 | `make test`（`.venv`，Python 3.12）与 `make runtime-test`（`runtime/` 的解释器） | 全量用例两边都全绿 | Ubuntu 两边全绿；统一到 3.12 时抓到并修了 SSE 释放问题 |
+| 壳 × runtime | `make desktop-smoke`；打好的包用 `--smoke` 再跑一次（AppImage：`APPIMAGE_EXTRACT_AND_RUN=1 ./*.AppImage --smoke`） | 后端报的 Python 版本 = runtime 的；ffmpeg 与字体来自 runtime；仿真网关可达；抓图 URL 正斜杠；优雅退出 < 5 s | Ubuntu 开发态与 AppImage 各一次通过 |
+| 三平台 CI | `.github/workflows/desktop.yml`（push / PR / 手动） | linux-x64、win-x64、mac-arm64、mac-x64 四个作业全绿并产出安装包 | **未跑**（工作流未推送） |
+| 人工 | 装包 → 第一次启动进设置 → 托盘切仿真 → `make seed` 那套演示跑一趟 → 托盘退出 | 三平台执行结果与事件序列一致；标注截图一致；退出时机器人被停下 | 等用户的 Windows / mac |
+| 真机 | Windows / mac 上 `SNAPSHOT_SOURCE=rtsp` 抓一帧、`TTS_SINKS=robot` 播一句 | 抓到的帧体检通过；机器人出声 | 等用户 |
+
+退出语义的回归点（`tests/test_stream.py` 后两条）：进程要退出时 SSE 必须自己结束，否则 uvicorn 的优雅退出会等那条永不结束的请求，
+`ctx.stop()`（停机器人）要到 40 s 强杀前都跑不到。桌面壳退出实测 44 s → 4 s；systemd 停服务时若有网页开着，同样受益。
+

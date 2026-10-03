@@ -10,6 +10,8 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+
+from app import platform
 from typing import Callable
 
 import numpy as np
@@ -50,6 +52,14 @@ def frame_detail(data: bytes) -> float:
     return float(np.abs(np.diff(a, axis=0)).mean())
 
 
+def _ffmpeg() -> str:
+    """ffmpeg 可执行文件：runtime 自带的优先，其次 PATH（见 app/platform.py）。没有就抛 SnapshotError。"""
+    exe = platform.ffmpeg_exe()
+    if not exe:
+        raise SnapshotError('本机没有 ffmpeg，无法抓帧')
+    return exe
+
+
 def _ffmpeg_grab_checked(cmd: list[str], *, timeout: float, label: str, url: str,
                          attempts: int, min_detail: float, context: dict | None) -> bytes:
     """跑 ffmpeg 抓一帧，并做两道体检；不合格就重抓。
@@ -67,7 +77,7 @@ def _ffmpeg_grab_checked(cmd: list[str], *, timeout: float, label: str, url: str
     for i in range(attempts):
         info['attempts'] = i + 1
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+            r = subprocess.run(cmd, capture_output=True, timeout=timeout, **platform.SUBPROCESS_KW)
         except subprocess.TimeoutExpired as e:
             raise SnapshotError(f'{label}抓帧超时（{timeout}s）：{url}') from e
         err = r.stderr.decode('utf-8', 'replace')
@@ -132,10 +142,9 @@ class RtspFfmpegSource(SnapshotSource):
         self.min_detail = min_detail
 
     def grab(self, context: dict | None = None) -> bytes:
-        if not shutil.which('ffmpeg'):
-            raise SnapshotError('本机没有 ffmpeg，无法抓帧')
+        ffmpeg = _ffmpeg()
         url = self.url_provider()
-        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp',
+        cmd = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp',
                '-i', url, '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-']
         return _ffmpeg_grab_checked(cmd, timeout=self.timeout, label='', url=url,
                                     attempts=self.attempts, min_detail=self.min_detail, context=context)
@@ -159,10 +168,9 @@ class HlsFfmpegSource(SnapshotSource):
         self.min_detail = min_detail
 
     def grab(self, context: dict | None = None) -> bytes:
-        if not shutil.which('ffmpeg'):
-            raise SnapshotError('本机没有 ffmpeg，无法抓帧')
+        ffmpeg = _ffmpeg()
         url = self.url_provider()
-        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', url, '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-']
+        cmd = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-i', url, '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-']
         return _ffmpeg_grab_checked(cmd, timeout=self.timeout, label='HLS ', url=url,
                                     attempts=self.attempts, min_detail=self.min_detail, context=context)
 
@@ -257,9 +265,9 @@ class LiveStreamSource(SnapshotSource):
                 if not self._wanted:
                     return
             try:
-                cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', *self.input_args_provider(),
+                cmd = [_ffmpeg(), '-hide_banner', '-loglevel', 'error', *self.input_args_provider(),
                        '-vf', f'fps={self.fps:g}', '-f', 'image2pipe', '-c:v', 'mjpeg', '-q:v', '2', 'pipe:1']
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **platform.SUBPROCESS_KW)
             except Exception as e:      # noqa: BLE001 —— 没有 ffmpeg / 地址拿不到：等一会再试，grab 会走退回路径
                 with self._lock:
                     self._last_err = f'启动 ffmpeg 失败: {e}'
@@ -410,8 +418,8 @@ class LavfiSource(SnapshotSource):
         self.filt = filt
 
     def grab(self, context: dict | None = None) -> bytes:
-        r = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', self.filt,
-                            '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-'], capture_output=True, timeout=30)
+        r = subprocess.run([_ffmpeg(), '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', self.filt,
+                            '-frames:v', '1', '-f', 'image2', '-q:v', '2', '-'], capture_output=True, timeout=30, **platform.SUBPROCESS_KW)
         if r.returncode != 0:
             raise SnapshotError(r.stderr.decode('utf-8', 'replace')[:300])
         return r.stdout

@@ -9,3 +9,4 @@ edge-tts>=6.1               # 默认 TTS 引擎；换 command 引擎可不装
 anthropic>=1.0              # VLM_PROVIDER=anthropic 才用；其他服务商走 requests
 
 # 开发/测试另需：pytest、ruff（make test / make lint）
+# Windows 上 uvicorn[standard] 不会装 uvloop（没有 Windows 轮子），用标准 asyncio 事件循环；requirements.lock 里已按平台标记。

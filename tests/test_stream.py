@@ -62,3 +62,38 @@ def test_stream_run_updates_and_cleanup(served, app_client, mock_robot):
     while (app_client.ctx.bus.subscriber_count or app_client.ctx.status._active_users) and time.time() - t0 < 25:
         time.sleep(0.5)
     assert app_client.ctx.bus.subscriber_count == 0 and app_client.ctx.status._active_users == 0
+
+
+def test_stream_ends_when_server_is_shutting_down(served, app_client):
+    """进程要退出时 SSE 必须自己结束：uvicorn 优雅退出会等在途请求，而 SSE 永不结束 ——
+    不自己退，lifespan 收尾（ctx.stop() 停机器人）要等到 40 s 强杀之前都跑不到（桌面壳退出实测 44 s → 4 s）。"""
+    import types
+    fake = types.SimpleNamespace(should_exit=False)
+    app_client.app.state.server = fake
+    try:
+        t0 = time.time()
+        with requests.get(f'{served}/api/stream', stream=True, timeout=(5, 20)) as r:
+            lines = r.iter_lines(decode_unicode=True)
+            assert next(l for l in lines if l and l.startswith('event: ')) == 'event: hello'
+            fake.should_exit = True                      # 等价于收到 SIGTERM / POST /api/shutdown
+            for _ in lines:                              # 服务端应在 1 s 轮询内结束响应
+                pass
+        assert time.time() - t0 < 5.0
+        t0 = time.time()
+        while app_client.ctx.bus.subscriber_count and time.time() - t0 < 5:
+            time.sleep(0.1)
+        assert app_client.ctx.bus.subscriber_count == 0
+    finally:
+        del app_client.app.state.server
+
+
+def test_stream_ends_on_shutdown_broadcast(served, app_client):
+    """POST /api/shutdown 会广播一条 shutdown，订阅者收到后立刻结束，不必等轮询。"""
+    with requests.get(f'{served}/api/stream', stream=True, timeout=(5, 20)) as r:
+        lines = r.iter_lines(decode_unicode=True)
+        assert next(l for l in lines if l and l.startswith('event: ')) == 'event: hello'
+        t0 = time.time()
+        app_client.ctx.bus.publish('shutdown', {'ts': time.time()})
+        got = [l for l in lines if l]
+        assert any(l == 'event: shutdown' for l in got)
+        assert time.time() - t0 < 3.0

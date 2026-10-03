@@ -6,10 +6,11 @@ import time
 import pytest
 from PIL import Image
 
+from app import platform
 from app.media.snapshot import LavfiSource, SnapshotError, build_source
 
 
-@pytest.mark.skipif(not shutil.which('ffmpeg'), reason='需要 ffmpeg')
+@pytest.mark.skipif(not platform.ffmpeg_exe(), reason='需要 ffmpeg')
 def test_lavfi_source_grabs_jpeg_via_pipe():
     data = LavfiSource('testsrc=size=640x320:rate=1').grab()
     img = Image.open(io.BytesIO(data))

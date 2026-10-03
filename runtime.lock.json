@@ -1,0 +1,58 @@
+{
+  "python": {
+    "version": "3.12.13"
+  },
+  "ffmpeg": {
+    "package": "imageio-ffmpeg",
+    "version": "0.6.0",
+    "wheels": {
+      "linux-x64": "manylinux2014_x86_64",
+      "win32-x64": "win_amd64",
+      "darwin-x64": "macosx_10_9_intel.macosx_10_9_x86_64",
+      "darwin-arm64": "macosx_11_0_arm64"
+    },
+    "assets": {
+      "linux-x64": {
+        "file": "imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/a0/2d/43c8522a2038e9d0e7dbdf3a61195ecc31ca576fb1527a528c877e87d973/imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl",
+        "sha256": "c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282",
+        "member": "imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2",
+        "ffmpeg_version": "7.0.2"
+      },
+      "win32-x64": {
+        "file": "imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/2c/c6/fa760e12a2483469e2bf5058c5faff664acf66cadb4df2ad6205b016a73d/imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl",
+        "sha256": "02fa47c83703c37df6bfe4896aab339013f62bf02c5ebf2dce6da56af04ffc0a",
+        "member": "imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe",
+        "ffmpeg_version": "7.1"
+      },
+      "darwin-x64": {
+        "file": "imageio_ffmpeg-0.6.0-py3-none-macosx_10_9_intel.macosx_10_9_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/da/58/87ef68ac83f4c7690961bce288fd8e382bc5f1513860fc7f90a9c1c1c6bf/imageio_ffmpeg-0.6.0-py3-none-macosx_10_9_intel.macosx_10_9_x86_64.whl",
+        "sha256": "9d2baaf867088508d4a3458e61eeb30e945c4ad8016025545f66c4b5aaef0a61",
+        "member": "imageio_ffmpeg/binaries/ffmpeg-macos-x86_64-v7.1",
+        "ffmpeg_version": "7.1"
+      },
+      "darwin-arm64": {
+        "file": "imageio_ffmpeg-0.6.0-py3-none-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/40/5c/f3d8a657d362cc93b81aab8feda487317da5b5d31c0e1fdfd5e986e55d17/imageio_ffmpeg-0.6.0-py3-none-macosx_11_0_arm64.whl",
+        "sha256": "b1ae3173414b5fc5f538a726c4e48ea97edc0d2cdc11f103afee655c463fa742",
+        "member": "imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1",
+        "ffmpeg_version": "7.1"
+      }
+    }
+  },
+  "fonts": [
+    {
+      "file": "NotoSansCJKsc-Regular.otf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+      "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+    },
+    {
+      "file": "LICENSE-NotoSansCJK.txt",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/LICENSE",
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    }
+  ],
+  "pinned_at": "2026-10-01T23:14:19+0800"
+}

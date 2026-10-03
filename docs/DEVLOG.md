@@ -315,3 +315,80 @@
 - 每条 `tts` 事件带分阶段耗时，下次不用再翻时间戳算。
 - 代码不替用户改设置（09-14 的教训）：文档里写清 `TTS_ROBOT_WAIT=0`、`settle_seconds` 调到 1–2。
 - 用例 148 → 153。
+
+# 开发日志（2026-10-01 夜 → 10-02）跨平台桌面版
+
+决策链：先看完整个工作空间给方案（便携包 vs Electron 壳）→ 用户定优先级「用户体验 > 开发时间 > 安装包体积，三平台尽可能复现 Ubuntu 表现」
+→ 定稿「后端只保留 Python + 应用自带运行时 + Electron 做壳」→ 用户说开干、先开发后测试、过程记进 docs、TODO 先写。
+
+## 22:55–23:10 摸环境、写 TODO、后端修补（D1）
+- 环境：Ubuntu 22.04、系统 Python 3.10.12、uv 0.11.28、node 22、DISPLAY 可用、1.7 T 空闲；开发实例没在跑。
+- 全仓库过了一遍 Linux 专属调用：真正绑死的只有 bash 启动链、ffmpeg/ffplay、`pano.py` 的字体路径、`requirements.lock` 的 uvloop。
+  业务代码里 `os.fork` / `fcntl` / `signal` 一个都没有（`soak.py` 的 `/proc` 与 `killpg` 是开发脚本）。
+- 写 `app/platform.py`、`app/api/system.py`（`/api/shutdown`、`/api/platform`）；`.env` utf-8-sig；6 处 `as_posix`；uvloop 标记；
+  `main()` 改为自己持有 `uvicorn.Server`（shutdown 接口要置 `should_exit`）。`tests/test_platform.py` 12 条。
+- 踩坑（自己的测试）：仓库里一旦真的组装出 `runtime/`，`platform.runtime_dir()` 的默认候选就会命中它，
+  测「没有 runtime」的用例必须把 `platform.ROOT` 指到临时目录。
+
+## 23:10–23:15 runtime 组装脚本（D2）
+- 先探 uv：`uv python install --install-dir` 1.5 s 装好 3.12.13（python-build-standalone，可搬运）；
+  但它会给解释器加 `EXTERNALLY-MANAGED`，`uv pip` 也拒绝往里装 —— 这是我们私有的运行时，删标记、用它自带的 pip 装锁。
+  还会往 `~/.local/bin` 放 `python3.12` 快捷方式（已有同名文件时报错）：加 `--no-bin`。
+- ffmpeg 来源换了两次：先用 eugeneware/ffmpeg-static，结果 b6.1.1 标签里 Linux 二进制报的是 7.0.2（标签与内容不符，
+  哈希钉住也说不清版本）；改用 PyPI `imageio-ffmpeg==0.6.0` 的四个平台轮子（文件不可变、哈希来自 PyPI 元数据），
+  `--pin` 时解开轮子读出各平台 ffmpeg 版本（Linux 7.0.2、Win/mac 7.1）写进锁。
+- Noto CJK 的许可文件路径在那个提交里是仓库根的 `LICENSE`，第一次写错了。
+- Linux runtime 组装完 411 MB，自检通过（10 个关键包 + 字体渲染中文 + `ffmpeg -version`）。
+
+## 23:15–23:20 用 runtime（3.12）跑全量用例 → 抓到一条真问题
+- `tests/test_stream.py::test_stream_run_updates_and_cleanup` 在 3.12 下**稳定失败**、3.10 稳定通过：客户端断开 25 s 后订阅仍在。
+  根因：SSE 用的是同步生成器，跑在线程池里、`q.get` 一等 15 s；断开后要等 keepalive 把线程放出来，然后还得靠解释器回收
+  生成器对象才会跑到 `finally`。3.10 碰巧很快，3.12 下引用环要等 GC。
+- 修：生成器改成 async，`anyio.to_thread.run_sync(q.get, True, 1.0, abandon_on_cancel=True)` 短超时轮询；
+  客户端一断开 Starlette 取消任务，CancelledError 立刻在 await 处抛出，`finally` 马上释放。两个解释器都过。
+- 这正是「换一个 Python 小版本行为就变」的例子 —— 钉死解释器版本并在三平台跑同一套用例，就是为了把这类事在 CI 里抓住。
+
+## 23:16–23:26 Electron 壳（D4）与打包（D5）
+- `desktop/main.js`：路径布局（打包后 `resources/backend` + `resources/runtime`，开发态仓库根 + `runtime/`，没有则 `.venv`）、
+  后端进程管理（净化 PYTHONPATH、随机 shutdown 口令、独立数据目录）、仿真模式、窗口 / 托盘、退出流程、崩溃拉起、自动更新、`--smoke`。
+- 踩坑：`npx electron .` 像普通 node 一样跑、`app` 是 undefined —— 这个会话跑在 Claude Code（Electron 宿主）里，
+  环境带着 `ELECTRON_RUN_AS_NODE=1`。`build_desktop.py` 与 make 目标统一 `env -u` 掉。另外 npm 第一次装跳过了 Electron 二进制下载，
+  `node node_modules/electron/install.js` 补上。
+- `--smoke` 开发态 2.2 s 起、0.4 s 优雅停；`electron-builder --linux AppImage` 出包 243 MB；
+  用 `APPIMAGE_EXTRACT_AND_RUN=1 ./*.AppImage --smoke` 验证打包后的布局：`packaged=true`，后端用的是 `resources/runtime` 里的
+  Python 3.12.13、ffmpeg 与字体，仿真模式可达，抓图 URL 正斜杠，优雅退出。
+- CI 工作流写好（三平台矩阵 + 缓存 + 打 tag 发布）；没推送，还没在 GitHub 上跑过。
+
+## 23:26–23:35 文档（D6）、截图模式、又抓到一条退出问题
+- `docs/DESKTOP.md`（架构、用户视角、构建发布、后端改动、验收标准、排障）、USAGE §1、deploy/README、HANDOFF、task.md §12 改写、
+  CHANGELOG 0.8.0、TODO 状态；`make docs-check` 过（用例数 153 → 165 → 176）。
+- 给壳加了 `--screenshot=` / `--open=` / `--scroll-to=`：开窗口、页面画完截一张就优雅退出。用它截了桌面版的总览与「设置 → 系统自检」
+  （新加了「运行环境」一行：Python / 自带运行时 / ffmpeg / 中文字体），进 `docs/screenshots/10-*.jpg`、`11-*.jpg`。
+- **截图模式暴露了退出要 44 s**：窗口开着时页面有一条 SSE，uvicorn 优雅退出会等在途请求，而 SSE 永不结束 → 一直等到壳 40 s 强杀。
+  这不只是桌面版的问题：**systemd 停服务时若有网页开着，`ctx.stop()`（停机器人）也要等到 `TimeoutStopSec` 强杀前都跑不到**。
+  修三处：SSE 生成器每轮检查 `server.should_exit`、`/api/shutdown` 广播一条 `shutdown` 让订阅者立刻结束、
+  `uvicorn.Config(timeout_graceful_shutdown=5)` 兜底；壳退出时先 `win.destroy()`。实测 44 s → 4 s（后端 0.3 s 退出）。
+  回归用例两条（`tests/test_stream.py`）。
+- `tests/test_build_runtime.py` 9 条：平台键、轮子里找 ffmpeg、两种解释器布局、哈希命中跳过下载、锁文件完整性。
+
+## 23:35–00:05 第二双眼睛：让一个子代理只读审一遍 diff，专盯 Windows / mac 上这里跑不到的路径
+- 它抓到 4 条确认的问题，全部已修并重新过了自检与截图流程：
+  ① **Windows CI 第一行就会死**：脚本 print 中文与 ✅，runner 的 stdout 是管道、默认 cp1252 → UnicodeEncodeError。
+     修：两个构建脚本启动时 `sys.stdout.reconfigure(encoding='utf-8')`，工作流再加 `PYTHONUTF8=1` 双保险。
+  ② **macOS 自动更新永远不会工作**：electron-updater 在 mac 上要求 latest-mac.yml 里有 zip，而 CI 只出 dmg；且 arm64 与 x64
+     两个作业各自发布会互相覆盖同一个 latest-mac.yml。修：mac 目标改 `dmg zip`；按架构分通道（构建时
+     `-c.publish.channel=latest-<arch>`，壳里 `autoUpdater.channel = 'latest-' + process.arch`）。
+  ③ **崩溃重启会漏一只 mock 网关在后台**（start() 不杀上一只）。修：start() 先杀旧的。
+  ④ **退出流程可重入**：`quitting` 在 `await backend.stop()` 之前就置位，第二次 Cmd+Q 会直接退出、跳过停机器人；
+     置位之前两次 quitFlow 会并发 stop 两次。修：`quitRequested`（进入即标记）与 `readyToExit`（停好才放行 before-quit）分开，
+     `Backend.stop()` 幂等（同一个 promise）。
+- 另修几条次要的：`PYTHONDONTWRITEBYTECODE=1`（别往只读的安装目录 / 已签名的 .app 里写 pyc）；shutdown 接口回非 200 当失败立刻退回强杀；
+  Windows 下大小写不敏感地清 PYTHONPATH；uv 的小版本别名在 Windows 是 junction、`is_symlink()` 看不出来；`~/.local/bin/uv.exe`；
+  日志 fd 泄漏；soak.py 子进程 PYTHONIOENCODING；`macos-13` runner 已下线改 `macos-15-intel`。
+- 它核过没问题的：stream.py 的取消语义与 `should_exit`、uvicorn 0.52 的 shutdown 顺序（在途响应会先送达再收尾）、
+  PBS 在 Windows 的布局假设、platform.py 的切分与子进程参数、测试在 Windows / mac runner 上的可移植性、工作流表达式。
+
+## 00:05– 收尾
+- `.venv` 重建为 Python 3.12.13（`bootstrap.sh --dev --recreate`，经 uv 下载的 python-build-standalone 与 runtime 同一份），
+  全量用例通过。老环境在 `.venv.old`。
+- 本次工作**未提交、未推送**（用户没有要求提交）；`git status` 里是全部改动，TODO.md §0 有逐项状态与下一步。

@@ -28,13 +28,17 @@ cd /home/leo/agent/scheduler
 ./start.sh --mock     # 仿真：本机 mock 网关 + 调度系统，不需要任何凭据
 ./start.sh --audio    # 叠加：本机播报服务 127.0.0.1:5566
 ./start.sh --status | --stop | --restart
-make test             # 153 用例，约 4 分钟；make lint
+make test             # 176 用例，约 4 分钟；make lint
 make smoke            # 真机只读冒烟（scripts/real_smoke.py）
 make vlm              # VLM 连通性探针（接新模型先跑这个）
 make seed             # 仿真下灌演示数据并跑一趟
 ```
 
 日志 `data/logs/app.log`（应用）与 `data/logs/app.out`（stdout）；pid 在 `data/run/`；库 `data/scheduler.db`（schema **v7**）。
+
+**桌面版**（v0.8.0 起）：`python3 scripts/build_runtime.py` 组装自带运行时（Python 3.12 + 锁定依赖 + ffmpeg + 字体），
+`python3 scripts/build_desktop.py` 出本平台安装包；`make desktop-smoke` 是壳的自检。三平台 CI 见 `.github/workflows/desktop.yml`。
+全部细节在 [DESKTOP.md](DESKTOP.md)。
 
 ## 4. 代码地图（改哪儿）
 
@@ -95,6 +99,15 @@ make seed             # 仿真下灌演示数据并跑一趟
 23. **Pillow 12 比 Pillow 9 严格**：`rectangle` 收到 `x1 < x0` 会直接 `ValueError`（9 是静默吞掉）。
     升级依赖后必跑 `tests/test_pano.py` —— 合成图里的门扇矩形就是这么暴露的（在小图上一直没画出来过）。
 
+22. **Python 小版本会改变行为**：SSE 同步生成器的释放在 3.10 下靠「碰巧很快的 GC」，3.12 下 25 s 都等不到（v0.8.0 改成异步生成器）。
+    所以解释器版本钉死在 `runtime.lock.json`，开发机 `.venv` 与桌面版 runtime 同一份，三平台 CI 跑同一套用例。
+23. **在 VS Code / Claude Code 里跑 `electron .` 会变成普通 node**：这些宿主带着 `ELECTRON_RUN_AS_NODE=1`。
+    `make desktop-smoke` / `build_desktop.py` 已清掉；手动跑记得 `env -u ELECTRON_RUN_AS_NODE`。
+24. **uv 装的解释器带 `EXTERNALLY-MANAGED`**，`uv pip` 也拒绝往里装；runtime 是我们私有的，`build_runtime.py` 删掉标记后用它自带的 pip 装锁。
+    uv 还会往 `~/.local/bin` 放 `python3.12` 快捷方式，脚本加了 `--no-bin`。
+25. **Windows 没有 SIGTERM、Node 发不出 Ctrl+Break**：桌面壳的「退出」只能走 `POST /api/shutdown`（启动口令），
+    行为与收到 SIGTERM 完全一样（lifespan 收尾 → `ctx.stop()` 停机器人）。别把这个接口做成无口令的。
+
 ## 6. mock 网关能仿什么
 
 `mock_gateway/` 按上游文档逐条仿真，并复刻了真机实测到的行为：状态词写读不对称、`Location` 恒 1（可切 `new` 版）、未定位 `/position` 503、透传只认机器人 ID、幂等重放、5 rps 限流、急停空体陷阱、`nav_preprocess` 阶段、完成后回 idle、idle 无 `progress`、中途替换不发 `task_started`。
@@ -113,6 +126,9 @@ make seed             # 仿真下灌演示数据并跑一趟
 - **`main` 已推送**（09-10）。之前的作者改写：全部提交的作者/提交者已改为
   `Zhongyuan Liu <zliu051@e.ntu.edu.sg>`（GitHub 按邮箱归属）；改写前的备份分支 `backup-stengg-email`，内容 diff 为空。
 - 分支 `V1` 是当前工作分支。曾经有过一段跨平台重写（135 个提交，从未推送），**已确认放弃并删除**。
+- **2026-10-01 起的跨平台桌面版不是那条路的复活**：后端只保留 Python，Electron 只做壳（`desktop/main.js` 不含业务逻辑），
+  应用自带运行时。决策与优先级（用户体验 > 开发时间 > 安装包体积）记录在 `docs/DESKTOP.md` 与 `task.md` §12。
+  桌面版的工作（v0.8.0）截至交接时**未提交、未推送**，TODO.md §0 有逐项状态。
 - 公开前已脱敏：另一台机器人的别名换成占位符；`ntu-dog-00001` / `R30_2026_001` / `cam-1c697ada870c` 保留（上游公开仓库文档里本来就有）。全历史扫过：无任何真实密钥，`config/.env` 与 `data/` 从未提交。
 - 公开仓库还缺 LICENSE（选哪个是用户的决定）。
 
@@ -123,6 +139,8 @@ make seed             # 仿真下灌演示数据并跑一趟
 | [USAGE.md](USAGE.md) | **日常操作入口**：装、启动、建任务航点、跑巡检、接 VLM/播报、维护、常见问题 |
 | [task.md](task.md) | 总纲：宪法约束（C1–C16）、术语、架构、数据模型、业务流程、接口清单、进度、问题清单、规划 |
 | [OPERATIONS.md](OPERATIONS.md) | 真机上线与安全细则、故障速查表 |
+| [DESKTOP.md](DESKTOP.md) | **桌面版**（Windows / macOS / Linux）：架构、构建与发布、后端改动、验收标准、排障 |
+| [WINDOWS_TEST.md](WINDOWS_TEST.md) | 去 Windows 上测桌面版：环境、步骤、人工清单、记什么、常见问题 |
 | [TEST_PLAN.md](TEST_PLAN.md) | 分步验收清单（含真机实测参考值与演练结果） |
 | [TEST_REPORT.md](TEST_REPORT.md) | 最近一轮测试报告（含 `.venv` 隔离改造的前后对比）|
 | [DEVLOG.md](DEVLOG.md) | 逐时开发日志（每个 bug 的现象→定位→修法都在这里） |

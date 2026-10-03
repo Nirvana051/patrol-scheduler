@@ -1,5 +1,51 @@
 # 变更记录
 
+## [0.8.0] - 2026-10-02 —— 跨平台桌面版：自带运行时 + Electron 壳（三平台同一份）
+
+**为什么**：要在 Windows / macOS / Linux 上「点击就能用」，并尽可能复现 Ubuntu 开发机上的表现。
+优先级（用户定）：用户体验 > 开发时间 > 安装包体积。上一次跨平台尝试把后端用 Node 重写（已放弃，`task.md` §12），
+这次**后端只保留 Python**：应用自带固定版本的 Python 3.12、锁定依赖、ffmpeg、Noto CJK 字体，Electron 只做壳。
+全文见 `docs/DESKTOP.md`。
+
+**新增**
+
+- `scripts/build_runtime.py` + `runtime.lock.json`：组装 `runtime/`（Python 3.12.13 经 uv 下载 python-build-standalone、
+  按 `requirements.lock` 装依赖、ffmpeg 取自 PyPI `imageio-ffmpeg` 四个平台的轮子、Noto Sans CJK），
+  来源与 sha256 全部钉死；`--check` 核对锁没变、解释器与 ffmpeg 能跑；`--pin` 重新钉来源。
+- `desktop/`：Electron 壳（`main.js`）。拉起后端、等健康检查、窗口 + 托盘、仿真模式（内置 mock 网关 + 独立数据目录）、
+  退出前确认并走 `POST /api/shutdown` 优雅停止（先停机器人，最多 40 s）、后端崩溃拉起、端口自选、单实例、
+  自动更新（GitHub Releases）、`--smoke` 自检模式。
+- `scripts/build_desktop.py`：核对 runtime → 同步版本号到 `desktop/package.json` → npm ci → 自检 → electron-builder
+  （Windows nsis+zip / macOS dmg+zip / Linux AppImage+deb）。`.github/workflows/desktop.yml` 三平台矩阵。
+- `app/platform.py`：ffmpeg / 字体 / 命令切分 / 子进程参数的统一入口（先 runtime，再环境变量，再 PATH）。
+- `POST /api/shutdown`（只在设置了 `PS_SHUTDOWN_TOKEN` 时存在）与 `GET /api/platform`；`/api/health` 带 `platform`。
+- `make runtime` / `runtime-check` / `runtime-test` / `desktop` / `desktop-smoke` / `dist`。
+
+**改**
+
+- **SSE 生成器改成异步**（`app/api/stream.py`）：客户端断开后立刻释放订阅与「有页面在看」计数。原来同步生成器在线程池里
+  等 15 s keepalive、再靠解释器回收生成器才释放 —— Python 3.10 碰巧很快，3.12 下 25 s 都等不到（`tests/test_stream.py`
+  在统一到 3.12 时抓到；不释放 = 状态轮询一直按高频跑）。
+- `config/.env` 读取用 utf-8-sig（Windows 记事本的 BOM 会让第一行键失效），位置可用 `PS_ENV_FILE` 指定。
+- 媒体相对路径拼 URL 的 6 处改 `as_posix()`（Windows 的 Path 是反斜杠）。
+- `requirements.lock`：uvloop 标记为 `sys_platform != "win32"`（没有 Windows 轮子，照锁装会失败）；`make lock` 会保留该标记。
+- `bootstrap.sh`：优先建 Python 3.12 的 `.venv`（有 uv 时自动下载同一份 python-build-standalone；3.10 已停止维护）。
+- `scripts/soak.py`：资源采样有 psutil 用 psutil，否则只在 Linux 读 `/proc`；临时目录用 `tempfile`；解释器用 `sys.executable`。
+- 字体候选改走 `platform.font_candidates()`：runtime 的 Noto CJK 优先，其次各系统自带 CJK 字体。
+
+- **进程退出时 SSE 自己结束**：uvicorn 优雅退出会等在途请求，而 SSE 永不结束 —— 有网页开着时 `ctx.stop()`（中止执行、
+  `DELETE /task` 停机器人）要到 40 s 强杀前都跑不到（桌面壳退出实测 44 s；systemd 停服务同样如此）。
+  改：SSE 每轮检查 `server.should_exit`、`/api/shutdown` 广播 `shutdown`、`timeout_graceful_shutdown=5` 兜底。退出降到 4 s。
+- 设置页「系统自检」多一行**运行环境**（Python / 自带运行时 / ffmpeg / 中文字体）。
+- 桌面壳的 `--screenshot=` / `--open=` / `--scroll-to=`（文档截图与 CI 产物用）。
+- 只读代码审查（子代理）后修的：Windows CI 的 stdout 编码（`PYTHONUTF8` + `reconfigure`）；macOS 自动更新要 zip 目标且按架构分通道
+  （`latest-arm64` / `latest-x64`）；崩溃重启不再漏 mock 网关；退出流程不可重入、`Backend.stop()` 幂等；
+  后端子进程 `PYTHONDONTWRITEBYTECODE=1`；Windows 上 uv 的 junction 别名能删掉；`macos-15-intel` runner。
+
+**测试**：`tests/test_platform.py` 12 条（查找顺序、命令切分、BOM、URL 正斜杠、shutdown 接口的 404/403/501/200）、
+`tests/test_build_runtime.py` 9 条（组装脚本不联网的部分）、`tests/test_stream.py` 加 2 条（退出时 SSE 结束）。
+全量用例用 `.venv`（3.12，重建后）与 `runtime/`（3.12）各跑一遍全绿；Electron `--smoke` 在开发态与打好的 AppImage 里各过一次。
+
 ## [0.7.0] - 2026-09-15 —— 到点流程提速：常驻读流 + 播报预合成 + 分阶段计时
 
 **现象**：用户反馈真机上「到点 → 抓帧 → 判读 → 播报」偏慢，怀疑是 mp3 太大传输慢。

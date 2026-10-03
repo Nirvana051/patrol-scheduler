@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ENV_FILE = ROOT / 'config' / '.env'
+# 桌面版把 .env 放在用户数据目录，用 PS_ENV_FILE 指过来；默认仍是仓库里的 config/.env
+ENV_FILE = Path(os.environ.get('PS_ENV_FILE') or (ROOT / 'config' / '.env'))
 
 DEFAULTS: dict[str, str] = {
     # 云端连接（真机改这三项；密钥只在服务端）
@@ -77,7 +78,8 @@ SECRET_KEYS = {'CX_KEY', 'VLM_API_KEY', 'ANTHROPIC_API_KEY', 'TTS_AUDIO_SERVER_T
 def load_env_file(path: Path = ENV_FILE) -> None:
     if not path.exists():
         return
-    for line in path.read_text(encoding='utf-8').splitlines():
+    # utf-8-sig：Windows 记事本可能存成带 BOM 的 UTF-8，否则第一行的键会变成 '\ufeffCX_HOST' 而悄悄失效
+    for line in path.read_text(encoding='utf-8-sig').splitlines():
         line = line.strip()
         if not line or line.startswith('#') or '=' not in line:
             continue

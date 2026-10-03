@@ -54,6 +54,13 @@ def main() -> int:
         problems.append('CHANGELOG.md: 找不到形如 `## [x.y.z]` 的最新条目')
     elif top.group(1) != code_version:
         problems.append(f'版本号不一致：app/__init__.py 是 {code_version}，CHANGELOG 最新条目是 {top.group(1)}')
+    # 桌面壳的 package.json 也用同一个版本号（scripts/build_desktop.py 会同步；这里钉住，别出现两个版本）
+    import json
+    pkg = ROOT / 'desktop' / 'package.json'
+    if pkg.exists():
+        pv = json.loads(pkg.read_text(encoding='utf-8')).get('version')
+        if pv != code_version:
+            problems.append(f'desktop/package.json 的 version 是 {pv}，app/__init__.py 是 {code_version}（跑 scripts/build_desktop.py 会同步）')
     for d in docs:
         s = d.read_text(encoding='utf-8')
         rel = d.relative_to(ROOT)

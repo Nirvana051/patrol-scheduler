@@ -12,3 +12,9 @@ __pycache__/
 .venv.old/
 *.log
 shots/
+
+# 自带运行时与桌面壳的构建产物（scripts/build_runtime.py / desktop/）
+runtime/
+runtime.cache/
+desktop/node_modules/
+desktop/dist/

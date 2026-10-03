@@ -23,6 +23,7 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import sys
 import time
 import urllib.error
@@ -60,8 +61,23 @@ def http(method: str, url: str, body=None, timeout=30, headers=None):
 
 
 def proc_stats(pid: int) -> dict:
-    """从 /proc 读资源指标。Python 没有 V8 堆，RSS + 线程数 + fd 数才是有意义的三个。"""
+    """资源指标：RSS + 线程数 + fd 数（Python 没有 V8 堆，这三个才有意义）。
+
+    装了 psutil 就三平台通用；否则 Linux 读 /proc，其它系统返回空（浸泡测试本身仍能跑，只是没有资源曲线）。"""
     out = {}
+    try:
+        import psutil
+        pr = psutil.Process(pid)
+        out = {'rss_kb': pr.memory_info().rss // 1024, 'threads': pr.num_threads()}
+        try:
+            out['fds'] = pr.num_fds() if hasattr(pr, 'num_fds') else pr.num_handles()
+        except Exception:
+            pass
+        return out
+    except ImportError:
+        pass
+    if not sys.platform.startswith('linux'):
+        return out
     try:
         for line in Path(f'/proc/{pid}/status').read_text().splitlines():
             if line.startswith('VmRSS:'):
@@ -100,7 +116,7 @@ class Soak:
         for k in ('PYTHONPATH', 'PYTHONHOME'):
             e.pop(k, None)
         e.update({
-            'PYTHONNOUSERSITE': '1',
+            'PYTHONNOUSERSITE': '1', 'PYTHONIOENCODING': 'utf-8',     # app.main 启动时 print 中文，Windows 下重定向到文件默认 cp1252 会炸
             'PS_DATA_DIR': str(self.data), 'PS_DB_PATH': str(self.db), 'PS_PORT': str(self.port),
             'CX_HOST': self.mock, 'CX_ROBOT': 'ntu-dog-00001', 'CX_KEY': 'cx_mock0001_' + '0' * 48,
             'SNAPSHOT_SOURCE': 'synthetic',
@@ -126,7 +142,7 @@ class Soak:
 
     def start_all(self):
         self.check_ports_free()
-        py = str(ROOT / '.venv/bin/python')
+        py = sys.executable                       # 用跑这个脚本的解释器（.venv 或 runtime），别写死 .venv/bin
         (self.dir / 'logs').mkdir(exist_ok=True)
         self.gw = subprocess.Popen(
             [py, '-m', 'mock_gateway.server', '--port', str(self.mock_port), '--speed', '8',
@@ -152,9 +168,9 @@ class Soak:
         for p in (self.app, self.gw):
             if p and p.poll() is None:
                 try:
-                    os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                    os.killpg(os.getpgid(p.pid), signal.SIGTERM)       # Windows 没有进程组信号：退到 terminate()
                 except Exception:
-                    p.send_signal(signal.SIGTERM)
+                    p.terminate()
         for p in (self.app, self.gw):
             if p:
                 try:
@@ -170,7 +186,7 @@ class Soak:
         if self.app and self.app.poll() is not None:
             self.restarts += 1
             print(f'  ⚠️  调度系统进程退出（码 {self.app.returncode}），重启并记一次异常')
-            py = str(ROOT / '.venv/bin/python')
+            py = sys.executable
             self.app = subprocess.Popen([py, '-m', 'app.main'], cwd=ROOT, env=self.env(),
                                         start_new_session=True,
                                         stdout=open(self.dir / 'logs/app.log', 'ab'),
@@ -498,7 +514,7 @@ def main() -> int:
     ap.add_argument('--only', default=None, help='只跑名字含该子串的场景')
     ap.add_argument('--port', type=int, default=8098)
     ap.add_argument('--mock-port', type=int, default=18488)
-    ap.add_argument('--dir', default='/tmp/ps-soak-py')
+    ap.add_argument('--dir', default=str(Path(tempfile.gettempdir()) / 'ps-soak-py'))
     a = ap.parse_args()
 
     until = datetime.fromisoformat(a.until).timestamp() if a.until else time.time() + 3600
@@ -509,7 +525,8 @@ def main() -> int:
         k.stop_all()
         raise SystemExit(130)
     signal.signal(signal.SIGTERM, _bye)
-    signal.signal(signal.SIGHUP, _bye)
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, _bye)
     atexit.register(k.stop_all)
     print(f'浸泡测试：{k.dir}  后端 {k.port}  网关 {k.mock_port}  跑到 {a.until or "一小时后"}')
     print('VLM=mock、TTS=none —— 不会调用 qwen 或任何付费接口')

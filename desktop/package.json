@@ -1,0 +1,173 @@
+{
+  "name": "patrol-scheduler-desktop",
+  "productName": "PatrolScheduler",
+  "version": "0.8.0",
+  "description": "巡检调度系统桌面版（certaintyX 机器狗）—— Electron 只做壳，后端是仓库里的 Python",
+  "main": "main.js",
+  "private": true,
+  "author": "Zhongyuan Liu",
+  "scripts": {
+    "start": "electron .",
+    "mock": "electron . --mock",
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "electron-log": "5.4.4",
+    "electron-updater": "6.8.9"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "cn.patrolscheduler.desktop",
+    "productName": "PatrolScheduler",
+    "copyright": "Copyright © 2026 Zhongyuan Liu",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      "assets/**"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "../runtime",
+        "to": "runtime"
+      },
+      {
+        "from": "../app",
+        "to": "backend/app",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../web",
+        "to": "backend/web"
+      },
+      {
+        "from": "../mock_gateway",
+        "to": "backend/mock_gateway",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../audio_server",
+        "to": "backend/audio_server",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../scripts",
+        "to": "backend/scripts",
+        "filter": [
+          "*.py"
+        ]
+      },
+      {
+        "from": "../config/env.example",
+        "to": "backend/config/env.example"
+      },
+      {
+        "from": "../requirements.lock",
+        "to": "backend/requirements.lock"
+      },
+      {
+        "from": "../runtime.lock.json",
+        "to": "backend/runtime.lock.json"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "巡检调度系统",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "executableName": "patrol-scheduler",
+      "desktop": {
+        "entry": {
+          "Name": "巡检调度系统",
+          "Comment": "certaintyX 机器狗巡检调度"
+        }
+      },
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Nirvana051",
+      "repo": "patrol-scheduler"
+    }
+  }
+}

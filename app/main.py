@@ -13,8 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import __version__
-from app.api import backup, events, maps, robot, runs, schedules, settings, stats, stream, task_waypoints, tasks
+from app import __version__, platform
+from app.api import backup, events, maps, robot, runs, schedules, settings, stats, stream, system, task_waypoints, tasks
 from app.config import Config
 from app.context import AppContext
 from app.db import Database
@@ -84,7 +84,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
         return JSONResponse({'detail': str(exc)}, status_code=400)
 
     for r in (robot.router, maps.router, task_waypoints.router, tasks.router, runs.router, events.router,
-              stream.router, settings.router, stats.router, schedules.router, backup.router):
+              stream.router, settings.router, stats.router, schedules.router, backup.router, system.router):
         app.include_router(r)
 
     started_at = time.time()
@@ -104,6 +104,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> FastAPI
                 'events': ctx.events.state(), 'active_run': ctx.runs.active_info(),
                 'status_age_s': None if not st.get('ts') else round(time.time() - st['ts'], 1),
                 'media_bytes': media_bytes, 'rate_limiter_total': ctx.gateway.limiter.total,
+                'platform': platform.describe(),
                 'adapters': {'vlm': ctx.vlm.describe(), 'tts': ctx.tts.describe(), 'snapshot': ctx.snapshot.describe()}}
 
     app.mount('/media', StaticFiles(directory=str(ctx.media_dir)), name='media')
@@ -117,8 +118,15 @@ def main() -> None:
     cfg = Config()
     app = create_app(cfg)
     host, port = cfg.get('PS_HOST'), cfg.get_int('PS_PORT')
-    print(f'巡检调度系统: http://{host}:{port}   模式={cfg.mode}  云端={cfg.get("CX_HOST")}  机器人={cfg.get("CX_ROBOT")}')
-    uvicorn.run(app, host=host, port=port, log_level=os.environ.get('PS_LOG_LEVEL', 'info'))
+    print(f'巡检调度系统: http://{host}:{port}   模式={cfg.mode}  云端={cfg.get("CX_HOST")}  机器人={cfg.get("CX_ROBOT")}', flush=True)
+    # 自己持有 Server 对象（而不是 uvicorn.run）：POST /api/shutdown 要把 should_exit 置位让它优雅退出 ——
+    # Windows 没有 SIGTERM，桌面壳只能走 HTTP；行为与收到 SIGTERM 完全一样（lifespan 收尾 → ctx.stop()）。
+    # timeout_graceful_shutdown=5：退出时最多等在途请求 5 秒就取消它们 —— 否则一个开着的网页（SSE 永不结束）
+    # 会让 uvicorn 一直等，lifespan 收尾（ctx.stop() 停机器人）要到 systemd / 桌面壳 40 秒强杀前都跑不到
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level=os.environ.get('PS_LOG_LEVEL', 'info'),
+                                           timeout_graceful_shutdown=5))
+    app.state.server = server
+    server.run()
 
 
 if __name__ == '__main__':

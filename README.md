@@ -22,8 +22,13 @@
 
 ## 跑起来
 
+**现场电脑（Windows / macOS / Linux）用桌面版**：安装包自带 Python 3.12、依赖、ffmpeg 与中文字体，和开发机跑的是同一份；
+第一次启动进「设置」填凭据即可，关窗口留在托盘，托盘「退出」会先停机器人。见 **`docs/DESKTOP.md`**。
+
+开发机：
+
 ```bash
-./bootstrap.sh --dev                       # 建隔离的 .venv + 按 requirements.lock 装依赖 + 自检
+./bootstrap.sh --dev                       # 建隔离的 .venv（Python 3.12）+ 按 requirements.lock 装依赖 + 自检
 cp -n config/env.example config/.env       # 填真机凭据；不填默认连本机 mock 网关（-n = 已存在就不动）
 
 ./start.sh --mock                          # 起 mock 网关(18443) + 调度系统(8088)，后台运行
@@ -51,12 +56,13 @@ make seed                                  # 灌演示数据并跑一遍
 
 `make start` / `make stop` / `make status` / `make run` / `make mock` / `make test` / `make lint` /
 `make docs-check` / `make shots` / `make seed` / `make smoke` / `make clean-media` / `make backup` /
-`make vlm` / `make eval` / `make audio-server` / `make lock`（`make` 不带参数看全部说明）
+`make vlm` / `make eval` / `make audio-server` / `make lock` /
+桌面版：`make runtime` / `make runtime-check` / `make runtime-test` / `make desktop` / `make desktop-smoke` / `make dist`（`make` 不带参数看全部说明）
 
 ## 测试
 
 ```bash
-make test          # 全量 153 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
+make test          # 全量 176 用例：单测 + mock 契约 + API + 端到端执行（约 4 分钟）
 make lint          # ruff 静态检查（ruff.toml）
 make docs-check    # 文档体检：链接/命令/版本号/用例数/schema 版本与代码是否一致
 make shots         # 无头 Chrome 截图每个视图并收集 JS 错误（需调度系统在跑）
@@ -72,13 +78,15 @@ env -u PYTHONPATH PYTHONNOUSERSITE=1 .venv/bin/python scripts/soak.py --rounds 2
 
 ```
 bootstrap.sh    一键准备 Python 环境（隔离 venv + 精确版本 + 自检）
+runtime.lock.json  桌面版自带运行时的来源与哈希（Python 3.12 / ffmpeg 轮子 / 字体）；scripts/build_runtime.py 按它组装 runtime/
+desktop/        Electron 壳（只拉起后端、窗口与托盘、优雅退出、自动更新；不含业务逻辑），scripts/build_desktop.py 出安装包
 start.sh        一键启停（后台，pid/日志在 data/）；run.sh 是前台版
 audio_server/   播报服务（扬声器端，纯标准库，部署到机器狗或现场 PC）
 app/            FastAPI 后端（api/ 路由，robot/ 云端连接与线程，executor/ 分段执行，media/ 全景与点云，vlm/ tts/ 适配器）
 app/vendor/     certaintyx.py —— Sample_web_api 仓库 6167083 的 SDK 原样拷贝，不改
 web/            原生 HTML/CSS/JS 前端（无构建）
 mock_gateway/   按文档契约仿真的云端网关 + 机器狗运动学
-tests/          pytest（153 用例）
+tests/          pytest（176 用例）
 scripts/        演示数据、浸泡测试、真机冒烟、备份/清理、截图、文档体检
 docs/           管理文档副本、使用说明、上线手册、测试方案与报告、开发日志、TODO、路线图
 ```

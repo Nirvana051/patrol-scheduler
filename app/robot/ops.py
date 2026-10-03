@@ -104,8 +104,8 @@ class RobotOps:
             raise OpsError(str(e)) from e
         p = save_jpeg(data, self.ctx.media_dir / subdir, timestamp_stem(prefix))
         img = pano.Image.open(p)
-        rel = p.relative_to(self.ctx.media_dir)
-        return {'path': str(rel), 'url': f'/media/{rel}', 'width': img.width, 'height': img.height,
+        rel = p.relative_to(self.ctx.media_dir).as_posix()
+        return {'path': rel, 'url': f'/media/{rel}', 'width': img.width, 'height': img.height,
                 'source': self.ctx.snapshot.describe(), 'ts': time.time()}
 
     # ── 执行前置检查（C8/C9/C11）────────────────────────────────────────────

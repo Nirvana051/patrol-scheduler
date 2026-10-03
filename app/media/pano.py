@@ -13,20 +13,16 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-_FONT_CANDIDATES = [
-    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-    '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
-    '/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc',
-    '/usr/share/fonts/truetype/arphic/uming.ttc',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-]
+from app import platform
 
 
 def font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for p in _FONT_CANDIDATES:
-        if Path(p).exists():
+    """中文字体：runtime/fonts/ 里的 Noto Sans CJK 优先（三平台同一份，标注逐像素一致），
+    其次各系统自带的 CJK 字体；都没有退到 PIL 默认字体（中文会是方块，只在没装 runtime 的裸环境出现）。"""
+    for p in platform.font_candidates():
+        if p.is_file():
             try:
-                return ImageFont.truetype(p, size)
+                return ImageFont.truetype(str(p), size)
             except OSError:
                 continue
     return ImageFont.load_default()

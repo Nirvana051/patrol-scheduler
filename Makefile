@@ -5,7 +5,7 @@ PY := $(if $(PS_PYTHON),$(PS_PYTHON),.venv/bin/python)
 # （实测 `make test` 会用到 ROS 环境里的 numpy）。start.sh / run.sh 内部已自行净化。
 PYRUN := env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 $(PY)
 
-.PHONY: start stop status run mock test lint docs-check shots seed smoke clean-media lock backup eval vlm audio-server
+.PHONY: start stop status run mock test lint docs-check shots seed smoke clean-media lock backup eval vlm audio-server runtime runtime-check runtime-test desktop desktop-smoke dist
 
 start:          ## 一键后台启动（按 config/.env；加 ARGS="--mock --audio" 可叠加）
 	./start.sh $(ARGS)
@@ -55,5 +55,26 @@ eval:           ## 用人工复核过的检查评测当前 VLM
 audio-server:   ## 本机起一个播报服务（扬声器端）用于联调：http://127.0.0.1:5566
 	$(PYRUN) -m audio_server --host 127.0.0.1 --port 5566
 
+# ── 桌面版 / 跨平台（见 docs/DESKTOP.md）────────────────────────────────
+RT_PY := $(shell python3 -c "import json,pathlib; m=pathlib.Path('runtime/manifest.json'); print('runtime/'+json.loads(m.read_text())['python']['exe'] if m.exists() else '')" 2>/dev/null)
+
+runtime:        ## 组装 runtime/（固定版本 Python 3.12 + 锁定依赖 + ffmpeg + Noto CJK，三平台同一份）
+	python3 scripts/build_runtime.py --dev
+
+runtime-check:  ## 核对 runtime/ 与锁一致、解释器与 ffmpeg 能跑
+	python3 scripts/build_runtime.py --check
+
+runtime-test:   ## 用 runtime/ 里的解释器跑全量用例（三平台一致性的验收项之一）
+	env -u PYTHONPATH -u PYTHONHOME PYTHONNOUSERSITE=1 $(RT_PY) -m pytest
+
+desktop:        ## 开发态起桌面壳（仿真模式，带窗口与托盘）
+	cd desktop && env -u ELECTRON_RUN_AS_NODE npx electron . --mock
+
+desktop-smoke:  ## 桌面壳自检：拉起后端 → 健康检查 → 抓图 → 优雅退出（不开窗口）
+	cd desktop && env -u ELECTRON_RUN_AS_NODE npx electron . --smoke
+
+dist:           ## 出本平台的安装包到 desktop/dist/（先 runtime，再 npm ci，再 electron-builder）
+	python3 scripts/build_desktop.py
+
 lock:           ## 重新生成 requirements.lock
-	pip3 --python $(PYRUN) freeze --local | grep -v -E '^(ruff|pip)=' > requirements.lock
+	pip3 --python $(PYRUN) freeze --local | grep -v -E '^(ruff|pip)=' | sed 's/^uvloop==\(.*\)$$/uvloop==\1; sys_platform != "win32"/' > requirements.lock

@@ -21,6 +21,7 @@ import threading
 import time
 from pathlib import Path
 
+from app import platform
 from app.robot.client import RobotError, clean_error_text
 from app.vendor.certaintyx import RobotClient
 
@@ -69,8 +70,8 @@ class CommandEngine(TtsEngine):
     def synthesize(self, text, out_path):
         if not self.template:
             raise RuntimeError('TTS_COMMAND 为空')
-        cmd = [part.replace('{text}', text).replace('{out}', str(out_path)) for part in shlex.split(self.template)]
-        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        cmd = [part.replace('{text}', text).replace('{out}', str(out_path)) for part in platform.split_command(self.template)]
+        r = subprocess.run(cmd, capture_output=True, timeout=60, **platform.SUBPROCESS_KW)
         if r.returncode != 0:
             raise RuntimeError(r.stderr.decode('utf-8', 'replace')[:300])
         return out_path if out_path.exists() else None
@@ -100,14 +101,14 @@ class LocalSpeakerSink(AudioSink):
     def play(self, text, audio_path, audio_url, meta):
         if audio_path is None:
             return 'skip（无音频文件）'
-        player = shutil.which('ffplay')
+        player = platform.ffmpeg_exe('ffplay')
         if player:
             cmd = [player, '-nodisp', '-autoexit', '-loglevel', 'error', str(audio_path)]
         elif shutil.which('paplay') and audio_path.suffix == '.wav':
             cmd = ['paplay', str(audio_path)]
         else:
             return 'error: 找不到 ffplay/paplay'
-        threading.Thread(target=lambda: subprocess.run(cmd, capture_output=True, timeout=120), daemon=True).start()
+        threading.Thread(target=lambda: subprocess.run(cmd, capture_output=True, timeout=120, **platform.SUBPROCESS_KW), daemon=True).start()
         return 'ok'
 
 
@@ -378,7 +379,7 @@ class TtsService:
                 out['error'] = f'合成失败: {e}'
             out['synth_ms'] = int((time.time() - t_syn) * 1000)
         if audio_path:
-            out['audio_path'] = str(audio_path.relative_to(self.media_dir))
+            out['audio_path'] = audio_path.relative_to(self.media_dir).as_posix()      # URL 永远用正斜杠（Windows 的 Path 是反斜杠）
             out['audio_url'] = f"{self.url_prefix}/{out['audio_path']}"
         for s in self.sinks:
             try:

@@ -78,7 +78,7 @@ class _FakeRun:
         self.script = list(script)
         self.calls = 0
 
-    def __call__(self, cmd, capture_output=False, timeout=None):
+    def __call__(self, cmd, capture_output=False, timeout=None, **_kw):
         rc, out, err = self.script[min(self.calls, len(self.script) - 1)]
         self.calls += 1
         return type('R', (), {'returncode': rc, 'stdout': out, 'stderr': err})()

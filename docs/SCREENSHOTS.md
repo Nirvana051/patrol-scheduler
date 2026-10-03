@@ -15,6 +15,15 @@
 | 任务事件 | ![](screenshots/08-events.jpg) | 云端 + 系统事件统一时间线，按来源/类型/级别/执行/关键字过滤，可导出 CSV |
 | 设置 | ![](screenshots/09-settings.jpg) | 连接、VLM（mock/qwen/openai_compat/anthropic）、TTS 与汇出、抓图源、机头校准、系统自检、备份/迁移 |
 
+## 桌面版（Electron 壳，v0.8.0）
+
+由壳自己截的（`npx electron . --mock --screenshot=x.png`，2× HiDPI 缩到 1200 宽），页面就是上面同一套前端，只是跑在自带运行时与自带 Chromium 里。
+
+| 页面 | 图 | 看什么 |
+|------|----|--------|
+| 桌面版 · 总览（仿真模式） | ![](screenshots/10-desktop-dashboard.jpg) | 和浏览器里完全一样；左下 **MOCK · 仿真** 来自托盘菜单的「仿真模式」，数据目录独立（data-mock） |
+| 桌面版 · 设置 · 系统自检 | ![](screenshots/11-desktop-settings-health.jpg) | 新增「运行环境」一行：Python 3.12.13 · 自带运行时 · ffmpeg · 中文字体 NotoSansCJKsc-Regular —— 三平台对账看这里 |
+
 ## 真机（Gazebo）到点抓到的全景（带角度范围标注）
 
 09-05 夜四点巡检时每个点抓到的原图，用来说明「圈范围」在真实画面上是什么效果。
