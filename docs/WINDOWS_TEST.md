@@ -1,4 +1,4 @@
-# 去 Windows 上测桌面版（交接单，分支 `muti-plat`，v0.8.0）
+# 去 Windows 上测桌面版（交接单，分支 `muti-plat`，v0.8.1）
 
 写给去 Windows 机器上做验证的人。目标是回答一个问题：**在 Ubuntu 上验过的那套东西，在 Windows 上是不是同样的表现。**
 Ubuntu 上已经过的：全量用例（`.venv` 与 runtime 各一遍）、壳自检、打包后的 AppImage 自检、真实窗口截图。
@@ -84,7 +84,7 @@ cd ..
 python scripts\build_desktop.py --target "nsis zip"
 ```
 
-期望：`desktop\dist\PatrolScheduler-0.8.0-win-x64.exe`（安装包）、`PatrolScheduler-0.8.0-win-x64.zip`、`latest.yml`。
+期望：`desktop\dist\PatrolScheduler-0.8.1-win-x64.exe`（安装包）、`PatrolScheduler-0.8.1-win-x64.zip`、`latest.yml`。
 这一步会再跑一次自检，并且第一次会下载 electron-builder 的工具（winCodeSign、nsis），几分钟。
 
 双击安装包。**未签名**，SmartScreen 会弹「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。安装到用户目录即可，不需要管理员。

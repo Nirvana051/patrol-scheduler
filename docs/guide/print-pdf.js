@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
     const broken = await win.webContents.executeJavaScript('[...document.images].filter((i) => !i.naturalWidth).map((i) => i.getAttribute("src"))');
     if (broken.length) throw new Error('图片缺失：' + broken.join(', '));
     const footer = `<div style="font-family:'Microsoft YaHei',sans-serif;font-size:7.5px;color:#9ca3af;width:100%;padding:0 16mm;display:flex;justify-content:space-between">
-      <span>巡检调度系统 · 安装与配置指南 · v0.8.0</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
+      <span>巡检调度系统 · 安装与配置指南 · v0.8.1</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
     const pdf = await win.webContents.printToPDF({
       printBackground: true, preferCSSPageSize: true, displayHeaderFooter: true,
       headerTemplate: '<div></div>', footerTemplate: footer, generateDocumentOutline: true, generateTaggedPDF: true,

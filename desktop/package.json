@@ -1,7 +1,7 @@
 {
   "name": "patrol-scheduler-desktop",
   "productName": "PatrolScheduler",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "巡检调度系统桌面版（certaintyX 机器狗）—— Electron 只做壳，后端是仓库里的 Python",
   "main": "main.js",
   "private": true,

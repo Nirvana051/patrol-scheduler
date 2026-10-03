@@ -50,7 +50,7 @@ def add(nodes, parent=None):
 
 add(tree)
 w.page_mode = '/UseOutlines'
-w.add_metadata({'/Title': '巡检调度系统 桌面版 安装与配置指南', '/Subject': 'PatrolScheduler 0.8.0 Windows 安装、配置与使用',
+w.add_metadata({'/Title': '巡检调度系统 桌面版 安装与配置指南', '/Subject': 'PatrolScheduler 0.8.1 Windows 安装、配置与使用',
                 '/Author': 'PatrolScheduler', '/Creator': 'Chromium printToPDF + pypdf'})
 tmp = src + '.tmp'
 with open(tmp, 'wb') as f:
